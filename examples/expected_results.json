@@ -1,0 +1,86 @@
+{
+  "description": "Expected SSR score ranges for test product concepts. These are hypothetical ranges based on semantic similarity to purchase intent anchors.",
+  "methodology": "Scores are derived from cosine similarity between free-text responses and the positive anchor 'I would definitely buy this product.' Higher scores indicate stronger purchase intent.",
+  "scale": {
+    "min": 0.0,
+    "max": 1.0,
+    "interpretation": {
+      "0.0-0.3": "Strong rejection - Low purchase intent",
+      "0.3-0.5": "Skeptical - Below average intent",
+      "0.5-0.6": "Neutral - Average intent",
+      "0.6-0.8": "Positive - Above average intent",
+      "0.8-1.0": "Enthusiastic - High purchase intent"
+    }
+  },
+  "expected_results": {
+    "positive_1": {
+      "product_id": "positive_1",
+      "name": "Free Morning Coffee",
+      "expected_mean": 0.75,
+      "expected_range": [0.65, 0.90],
+      "expected_std_dev_min": 0.08,
+      "rationale": "Free premium product with clear value proposition. Should generate highly positive responses across demographics."
+    },
+    "positive_2": {
+      "product_id": "positive_2",
+      "name": "AI Personal Assistant",
+      "expected_mean": 0.68,
+      "expected_range": [0.55, 0.85],
+      "expected_std_dev_min": 0.10,
+      "rationale": "Tech product with broad appeal but varying relevance. Tech-savvy personas should score higher."
+    },
+    "negative_1": {
+      "product_id": "negative_1",
+      "name": "Overpriced Plastic Cup",
+      "expected_mean": 0.25,
+      "expected_range": [0.10, 0.40],
+      "expected_std_dev_min": 0.05,
+      "rationale": "Obviously overpriced with no value. Should generate consistently negative responses."
+    },
+    "neutral_1": {
+      "product_id": "neutral_1",
+      "name": "New Email App",
+      "expected_mean": 0.50,
+      "expected_range": [0.40, 0.60],
+      "expected_std_dev_min": 0.08,
+      "rationale": "Commodity product with incremental differentiation. Mixed responses expected."
+    },
+    "neutral_2": {
+      "product_id": "neutral_2",
+      "name": "Weather Widget",
+      "expected_mean": 0.52,
+      "expected_range": [0.40, 0.65],
+      "expected_std_dev_min": 0.08,
+      "rationale": "Free utility with limited excitement. Mildly positive to neutral responses."
+    },
+    "mixed_1": {
+      "product_id": "mixed_1",
+      "name": "Smart Meal Planner",
+      "expected_mean": 0.62,
+      "expected_range": [0.45, 0.80],
+      "expected_std_dev_min": 0.12,
+      "rationale": "Niche product with strong appeal to health-conscious personas. High variance expected."
+    },
+    "niche_1": {
+      "product_id": "niche_1",
+      "name": "Vintage Vinyl Record Player",
+      "expected_mean": 0.55,
+      "expected_range": [0.30, 0.80],
+      "expected_std_dev_min": 0.15,
+      "rationale": "Specialty product with strong niche appeal. Music lovers should score high, others low. Highest variance expected."
+    }
+  },
+  "validation_criteria": {
+    "variance_check": "All products should have std_dev > expected_std_dev_min",
+    "range_check": "Mean score should fall within expected_range for 80%+ of runs",
+    "ordering_check": "Mean scores should follow: negative_1 < neutral < positive",
+    "cost_check": "Total cost for N=100 should be < $1.00",
+    "time_check": "Execution time for N=100 should be < 120 seconds"
+  },
+  "notes": [
+    "These expected ranges are estimates based on the SSR methodology",
+    "Actual results may vary based on LLM temperature and persona diversity",
+    "Real embeddings will show higher variance than mock embeddings",
+    "Run multiple trials (n>=3) to validate consistency"
+  ]
+}

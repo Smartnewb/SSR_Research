@@ -1,0 +1,53 @@
+{
+  "products": [
+    {
+      "id": "positive_1",
+      "name": "Free Morning Coffee",
+      "description": "A subscription service that delivers a freshly brewed cup of premium coffee to your doorstep every morning at no cost. Simply sign up and enjoy artisanal coffee from local roasters, delivered hot and ready to drink.",
+      "expected_score_range": [0.7, 1.0],
+      "category": "positive"
+    },
+    {
+      "id": "positive_2",
+      "name": "AI Personal Assistant",
+      "description": "A smart AI assistant that learns your habits and automates your daily routine - scheduling meetings, ordering groceries, managing bills, and even suggesting activities based on your mood. Available 24/7 through voice commands.",
+      "expected_score_range": [0.6, 0.9],
+      "category": "positive"
+    },
+    {
+      "id": "negative_1",
+      "name": "Overpriced Plastic Cup",
+      "description": "A standard plastic disposable cup priced at $1,000. It's just a regular cup with no special features - the same kind you'd get at a fast food restaurant. No warranty, no returns.",
+      "expected_score_range": [0.0, 0.3],
+      "category": "negative"
+    },
+    {
+      "id": "neutral_1",
+      "name": "New Email App",
+      "description": "Yet another email application with a slightly different interface. It has all the standard features you'd expect - inbox, sent mail, drafts, spam filter. Compatible with Gmail and Outlook.",
+      "expected_score_range": [0.4, 0.6],
+      "category": "neutral"
+    },
+    {
+      "id": "neutral_2",
+      "name": "Weather Widget",
+      "description": "A desktop widget that shows the current weather and a 5-day forecast. It updates every hour and displays temperature, humidity, and chance of rain. Free to download.",
+      "expected_score_range": [0.4, 0.6],
+      "category": "neutral"
+    },
+    {
+      "id": "mixed_1",
+      "name": "Smart Meal Planner",
+      "description": "An AI-powered meal planning app that creates personalized weekly menus based on your dietary preferences, budget, and nutritional goals. Includes grocery lists and step-by-step recipes. Subscription: $15/month.",
+      "expected_score_range": [0.5, 0.8],
+      "category": "mixed"
+    },
+    {
+      "id": "niche_1",
+      "name": "Vintage Vinyl Record Player",
+      "description": "A handcrafted wooden record player combining 1960s aesthetics with modern sound engineering. Features Bluetooth connectivity, USB recording, and premium speakers. Limited edition, $599.",
+      "expected_score_range": [0.3, 0.7],
+      "category": "niche"
+    }
+  ]
+}
