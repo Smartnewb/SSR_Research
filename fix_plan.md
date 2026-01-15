@@ -172,3 +172,487 @@ All three phases implemented successfully:
 - Cache anchor embeddings (compute once, reuse)
 - Test with mock data before burning API credits
 - Use Responses API (not Chat Completions) for GPT-5.2
+
+---
+
+## Phase 4: Modern Web Interface 🚀 IN PROGRESS
+
+### 13. Technology Stack Selection ✅
+**Goal**: Replace Streamlit with a modern, production-ready web stack
+
+#### Frontend Framework Options
+- [x] **Next.js + React** (Selected)
+  - TypeScript for type safety
+  - Server-side rendering (SSR) for SEO
+  - API routes for backend integration
+  - Tailwind CSS for styling
+  - shadcn/ui for component library
+
+**Decision**: Next.js + React (most mature ecosystem, better for complex UIs)
+
+---
+
+### 14. Backend API Development ✅ COMPLETE
+**Goal**: Create RESTful API to replace direct Python execution
+
+#### 14.1 API Architecture ✅
+- [x] Design RESTful API endpoints
+  - `POST /api/surveys` - Run survey
+  - `POST /api/surveys/compare` - A/B testing
+  - `GET /api/surveys/:id/export` - Download CSV (placeholder)
+  - `GET /health` - Health check
+
+#### 14.2 Framework Selection ✅
+- [x] **FastAPI** (Selected)
+  - Modern Python async framework
+  - Auto-generated OpenAPI docs
+  - Type hints with Pydantic
+  - WebSocket support for real-time updates
+
+#### 14.3 Implementation Tasks ✅
+- [x] Set up FastAPI project structure
+  ```
+  backend/
+  ├── app/
+  │   ├── __init__.py
+  │   ├── main.py           # FastAPI app
+  │   ├── routes/
+  │   │   ├── surveys.py    # Survey endpoints
+  │   │   ├── health.py     # Health check
+  │   │   └── websocket.py  # WebSocket endpoint
+  │   ├── models/
+  │   │   ├── request.py    # Pydantic request models
+  │   │   └── response.py   # Pydantic response models
+  │   ├── services/
+  │   │   └── survey.py     # Business logic
+  │   └── core/
+  │       └── config.py     # Configuration
+  ├── requirements.txt
+  └── tests/
+  ```
+
+- [x] Implement core endpoints
+  - [x] `POST /api/surveys` - Run survey with progress tracking
+  - [x] `POST /api/surveys/compare` - A/B testing
+
+- [x] Add WebSocket support for real-time progress
+  - [x] `/ws/surveys/:id` - Live progress updates
+  - [x] Send progress percentage, current persona, estimated time
+
+- [x] Add request validation
+  - [x] Pydantic models for all requests
+  - [x] Input sanitization
+  - [ ] Rate limiting - *future enhancement*
+
+- [x] Add error handling
+  - [x] Custom error responses
+  - [x] Survey execution errors
+  - [x] Proper HTTP status codes
+
+- [x] Add CORS configuration
+  - [x] Allow frontend origin (localhost:3000)
+  - [x] Secure credentials handling
+
+- [x] Write API tests
+  - [x] Unit tests for each endpoint (21 tests passing)
+  - [x] Integration tests with mock data
+  - [ ] Load testing for concurrent surveys - *future enhancement*
+
+---
+
+### 15. Frontend Development (Next.js + React)
+**Goal**: Build modern, responsive web UI
+
+#### 15.1 Project Setup
+- [ ] Initialize Next.js project with TypeScript
+  ```bash
+  npx create-next-app@latest frontend --typescript --tailwind --app
+  ```
+- [ ] Install dependencies
+  - [ ] `@tanstack/react-query` - Server state management
+  - [ ] `axios` - HTTP client
+  - [ ] `recharts` - Charts and visualizations
+  - [ ] `shadcn/ui` - Component library
+  - [ ] `zustand` - Client state management
+  - [ ] `react-hook-form` - Form handling
+  - [ ] `zod` - Schema validation
+
+#### 15.2 Project Structure
+```
+frontend/
+├── app/
+│   ├── layout.tsx         # Root layout
+│   ├── page.tsx           # Home page
+│   ├── surveys/
+│   │   ├── new/
+│   │   │   └── page.tsx   # Create survey
+│   │   ├── [id]/
+│   │   │   ├── page.tsx   # Survey results
+│   │   │   └── compare/
+│   │   │       └── page.tsx # A/B testing
+│   └── api/               # Next.js API routes (proxy)
+├── components/
+│   ├── ui/                # shadcn/ui components
+│   ├── survey/
+│   │   ├── SurveyForm.tsx
+│   │   ├── ResultsDashboard.tsx
+│   │   ├── ScoreDistribution.tsx
+│   │   ├── PersonaTable.tsx
+│   │   └── ProgressTracker.tsx
+│   └── layout/
+│       ├── Header.tsx
+│       └── Footer.tsx
+├── lib/
+│   ├── api.ts            # API client
+│   ├── types.ts          # TypeScript types
+│   └── utils.ts          # Utilities
+├── hooks/
+│   ├── useSurvey.ts      # Survey operations
+│   └── useWebSocket.ts   # Real-time updates
+└── public/
+    └── assets/
+```
+
+#### 15.3 Page Development
+
+##### 15.3.1 Home Page (`/`)
+- [ ] Hero section
+  - [ ] Project title and description
+  - [ ] "Start Survey" CTA button
+  - [ ] Key features showcase
+
+- [ ] Features section
+  - [ ] SSR methodology explanation
+  - [ ] Cost comparison table
+  - [ ] Speed comparison
+
+- [ ] Getting started guide
+  - [ ] Quick tutorial
+  - [ ] Example results preview
+
+##### 15.3.2 Create Survey Page (`/surveys/new`)
+- [ ] Product input form
+  - [ ] Product description textarea
+  - [ ] Character count indicator
+  - [ ] Example products dropdown
+
+- [ ] Demographics configuration
+  - [ ] Age range slider (18-80)
+  - [ ] Gender selection (checkboxes)
+  - [ ] Occupation multi-select
+  - [ ] Income bracket selection
+  - [ ] Location selection
+
+- [ ] Survey settings
+  - [ ] Sample size slider (5-200)
+  - [ ] Mock mode toggle
+  - [ ] SSR method selection (simple/projection)
+
+- [ ] Cost estimator
+  - [ ] Real-time cost calculation
+  - [ ] Token usage estimate
+  - [ ] Execution time estimate
+
+- [ ] Form validation
+  - [ ] Required field checks
+  - [ ] Input sanitization
+  - [ ] Error messages
+
+##### 15.3.3 Survey Results Page (`/surveys/[id]`)
+- [ ] Results header
+  - [ ] Survey ID and timestamp
+  - [ ] Product description
+  - [ ] Re-run button
+
+- [ ] Key metrics cards
+  - [ ] Average SSR score (large number)
+  - [ ] Standard deviation
+  - [ ] Min/Max scores
+  - [ ] Total cost
+  - [ ] Execution time
+
+- [ ] Score distribution chart
+  - [ ] Histogram with 10 bins
+  - [ ] Interactive tooltips
+  - [ ] Color coding (red/yellow/green)
+
+- [ ] Persona responses table
+  - [ ] Sortable columns (score, age, occupation)
+  - [ ] Filterable by demographics
+  - [ ] Expandable response text
+  - [ ] Pagination (20 per page)
+
+- [ ] Export options
+  - [ ] CSV download button
+  - [ ] JSON download button
+  - [ ] Share results link
+
+- [ ] Insights section
+  - [ ] Demographic breakdown
+  - [ ] Top positive/negative quotes
+  - [ ] Variance analysis
+
+##### 15.3.4 A/B Testing Page (`/surveys/compare`)
+- [ ] Product comparison form
+  - [ ] Product A input
+  - [ ] Product B input
+  - [ ] Shared demographics settings
+  - [ ] Sample size (per product)
+
+- [ ] Comparison results
+  - [ ] Side-by-side score cards
+  - [ ] Overlapping distribution charts
+  - [ ] Statistical significance (p-value)
+  - [ ] Cohen's d effect size
+  - [ ] 95% confidence intervals
+  - [ ] Winner declaration
+
+- [ ] Detailed breakdown
+  - [ ] Score difference by demographic
+  - [ ] Response comparison table
+  - [ ] Export comparison report
+
+#### 15.4 Component Development
+
+##### 15.4.1 Survey Form Component
+- [ ] Product description input with validation
+- [ ] Demographics selector (multi-select dropdowns)
+- [ ] Sample size slider with visual feedback
+- [ ] Mock mode toggle
+- [ ] Submit button with loading state
+- [ ] Form state management (react-hook-form)
+
+##### 15.4.2 Progress Tracker Component
+- [ ] Real-time progress bar
+- [ ] WebSocket connection for live updates
+- [ ] Current persona display
+- [ ] Estimated time remaining
+- [ ] Cancel survey button
+- [ ] Error state handling
+
+##### 15.4.3 Results Dashboard Component
+- [ ] Metric cards with animations
+- [ ] Score distribution chart (recharts)
+- [ ] Responsive layout (grid)
+- [ ] Loading skeletons
+- [ ] Empty state handling
+
+##### 15.4.4 Persona Table Component
+- [ ] Sortable, filterable data table
+- [ ] Expandable rows for full responses
+- [ ] Demographic tag pills
+- [ ] Copy response to clipboard
+- [ ] Highlight feature
+
+##### 15.4.5 Score Distribution Chart
+- [ ] Histogram visualization
+- [ ] Interactive tooltips
+- [ ] Color-coded bins
+- [ ] Responsive sizing
+- [ ] Export as image
+
+---
+
+### 16. Real-time Features
+**Goal**: Provide live feedback during survey execution
+
+#### 16.1 WebSocket Implementation
+- [ ] Backend: FastAPI WebSocket endpoint
+  - [ ] Connection management
+  - [ ] Progress broadcasting
+  - [ ] Error handling
+
+- [ ] Frontend: WebSocket hook
+  - [ ] Auto-reconnect logic
+  - [ ] Message handling
+  - [ ] State updates
+
+#### 16.2 Progress Updates
+- [ ] Send progress events
+  - [ ] Persona generation progress
+  - [ ] Survey execution progress (per persona)
+  - [ ] Embedding calculation progress
+  - [ ] SSR calculation progress
+
+- [ ] Display progress
+  - [ ] Progress bar (0-100%)
+  - [ ] Current step indicator
+  - [ ] Estimated time remaining
+  - [ ] Cancel button (graceful shutdown)
+
+---
+
+### 17. Deployment & DevOps
+**Goal**: Deploy to production
+
+#### 17.1 Backend Deployment
+- [ ] Containerization
+  - [ ] Create Dockerfile for FastAPI
+  - [ ] Docker Compose for local development
+  - [ ] Environment variable management
+
+- [ ] Hosting options
+  - [ ] **Option A: Railway** - Simple Python deployment
+  - [ ] **Option B: Render** - Free tier available
+  - [ ] **Option C: AWS Lambda** - Serverless (complex for long tasks)
+  - [ ] **Option D: DigitalOcean App Platform**
+
+**Decision**: Railway (easy Python deployment, good for FastAPI)
+
+#### 17.2 Frontend Deployment
+- [ ] Build optimization
+  - [ ] Next.js static export or SSR
+  - [ ] Image optimization
+  - [ ] Code splitting
+
+- [ ] Hosting options
+  - [ ] **Vercel** - Best for Next.js (Recommended)
+  - [ ] **Netlify** - Alternative
+  - [ ] **Cloudflare Pages**
+
+**Decision**: Vercel (native Next.js support)
+
+#### 17.3 Database (Optional)
+- [ ] Survey history storage
+  - [ ] PostgreSQL for survey results
+  - [ ] Redis for caching
+
+- [ ] Hosting
+  - [ ] Supabase (PostgreSQL + Auth)
+  - [ ] Railway PostgreSQL
+  - [ ] Upstash (Redis)
+
+#### 17.4 CI/CD Pipeline
+- [ ] GitHub Actions
+  - [ ] Run tests on PR
+  - [ ] Auto-deploy to staging
+  - [ ] Auto-deploy to production (on main merge)
+
+- [ ] Environment management
+  - [ ] Development
+  - [ ] Staging
+  - [ ] Production
+
+---
+
+### 18. Testing Strategy
+**Goal**: Ensure web UI quality
+
+#### 18.1 Backend Tests
+- [ ] Unit tests (pytest)
+  - [ ] API endpoint tests
+  - [ ] Request validation tests
+  - [ ] Error handling tests
+
+- [ ] Integration tests
+  - [ ] End-to-end survey execution
+  - [ ] WebSocket communication
+  - [ ] Mock mode verification
+
+- [ ] Load tests
+  - [ ] Concurrent survey handling
+  - [ ] Rate limiting verification
+
+#### 18.2 Frontend Tests
+- [ ] Unit tests (Jest + React Testing Library)
+  - [ ] Component rendering tests
+  - [ ] User interaction tests
+  - [ ] Form validation tests
+
+- [ ] E2E tests (Playwright)
+  - [ ] Full survey workflow
+  - [ ] A/B testing workflow
+  - [ ] Export functionality
+
+- [ ] Visual regression tests
+  - [ ] Component snapshots
+  - [ ] Page screenshots
+
+---
+
+### 19. Documentation
+**Goal**: Document new web interface
+
+- [ ] Update README.md
+  - [ ] Web UI setup instructions
+  - [ ] API documentation link
+  - [ ] Deployment guide
+
+- [ ] Create API documentation
+  - [ ] OpenAPI/Swagger docs (auto-generated)
+  - [ ] Endpoint descriptions
+  - [ ] Request/response examples
+
+- [ ] Create user guide
+  - [ ] How to run surveys
+  - [ ] How to interpret results
+  - [ ] A/B testing guide
+  - [ ] Troubleshooting
+
+- [ ] Developer guide
+  - [ ] Local development setup
+  - [ ] Architecture overview
+  - [ ] Contributing guidelines
+
+---
+
+## Phase 4 Milestones
+
+### Milestone 1: Backend API (Week 1-2)
+- [ ] FastAPI setup complete
+- [ ] Core endpoints implemented
+- [ ] WebSocket support
+- [ ] Tests passing
+- [ ] Deployed to Railway
+
+### Milestone 2: Frontend MVP (Week 3-4)
+- [ ] Next.js project setup
+- [ ] Survey form page
+- [ ] Results page (basic)
+- [ ] API integration
+- [ ] Deployed to Vercel
+
+### Milestone 3: Full Features (Week 5-6)
+- [ ] A/B testing page
+- [ ] Real-time progress
+- [ ] Advanced visualizations
+- [ ] Export functionality
+- [ ] Mobile responsive
+
+### Milestone 4: Production Ready (Week 7-8)
+- [ ] Full test coverage
+- [ ] Performance optimization
+- [ ] Security hardening
+- [ ] Documentation complete
+- [ ] User feedback incorporated
+
+---
+
+## Phase 4 Tech Stack Summary
+
+**Backend**:
+- FastAPI (Python async web framework)
+- Uvicorn (ASGI server)
+- Pydantic (data validation)
+- WebSockets (real-time communication)
+- Railway (hosting)
+
+**Frontend**:
+- Next.js 14 (React framework with App Router)
+- TypeScript (type safety)
+- Tailwind CSS (styling)
+- shadcn/ui (component library)
+- Recharts (data visualization)
+- React Query (server state)
+- Zustand (client state)
+- Vercel (hosting)
+
+**DevOps**:
+- Docker (containerization)
+- GitHub Actions (CI/CD)
+- Vercel + Railway (deployment)
+
+**Optional**:
+- Supabase (PostgreSQL + Auth)
+- Redis (caching)
+- Sentry (error tracking)

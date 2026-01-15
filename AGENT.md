@@ -162,3 +162,83 @@ EMBEDDING_MODEL=text-embedding-3-small
 - Mock mode uses random embeddings (lower variance than real)
 - Integration test `test_real_survey_small` is skipped by default (requires API key)
 - Run with `pytest -m integration` to include API tests
+
+---
+
+## Backend API (FastAPI)
+
+### Run Backend Server
+```bash
+# Install backend dependencies
+pip install fastapi uvicorn pydantic-settings httpx websockets
+
+# Run development server
+uvicorn backend.app.main:app --reload --port 8000
+
+# Production server
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Run Backend Tests
+```bash
+python -m pytest backend/tests/ -v
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | API info |
+| GET | `/health` | Health check |
+| POST | `/api/surveys` | Run survey |
+| POST | `/api/surveys/compare` | A/B testing |
+| WS | `/ws/surveys/{id}` | Real-time progress |
+
+### API Documentation
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### Example API Request
+```bash
+# Run mock survey
+curl -X POST http://localhost:8000/api/surveys \
+  -H "Content-Type: application/json" \
+  -d '{
+    "product_description": "Smart coffee mug that keeps your drink hot - $79",
+    "sample_size": 10,
+    "use_mock": true
+  }'
+
+# A/B Test
+curl -X POST http://localhost:8000/api/surveys/compare \
+  -H "Content-Type: application/json" \
+  -d '{
+    "product_a": "Smart mug - $79",
+    "product_b": "Regular mug - $15",
+    "sample_size": 10,
+    "use_mock": true
+  }'
+```
+
+### Backend Project Structure
+```
+backend/
+├── app/
+│   ├── main.py           # FastAPI app
+│   ├── core/
+│   │   └── config.py     # Configuration
+│   ├── routes/
+│   │   ├── health.py     # Health endpoints
+│   │   ├── surveys.py    # Survey endpoints
+│   │   └── websocket.py  # WebSocket endpoint
+│   ├── models/
+│   │   ├── request.py    # Request models
+│   │   └── response.py   # Response models
+│   └── services/
+│       └── survey.py     # Business logic
+├── tests/
+│   ├── test_health.py
+│   ├── test_surveys.py
+│   └── test_models.py
+└── requirements.txt
+```
