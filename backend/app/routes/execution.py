@@ -296,10 +296,17 @@ async def _execute_survey_background(
         # Execute survey for each concept
         concept_scores = []
         for concept in concepts:
+            # Build product description with null safety
+            headline = concept.headline or concept.title or "Product"
+            benefit = concept.benefit or "Key benefits"
+            rtb = concept.rtb or "Quality assured"
+            price = concept.price or "Contact for pricing"
+            product_desc = f"{headline}\n\n{benefit}\n\nReason to believe: {rtb}\n\nPrice: {price}"
+
             concept_score = await _execute_single_concept_survey(
                 concept_id=concept.id,
-                concept_title=concept.title,
-                product_description=f"{concept.headline}\n\n{concept.benefit}\n\nReason to believe: {concept.rtb}\n\nPrice: {concept.price}",
+                concept_title=concept.title or "Unnamed Concept",
+                product_description=product_desc,
                 personas=personas,
                 use_mock=use_mock,
                 progress_callback=update_progress,
@@ -369,11 +376,28 @@ async def start_execution(
     This triggers background execution of the survey with all generated personas.
     Supports single concept, A/B testing (2 concepts), and multi-compare (3-5 concepts).
     """
+    from ..models.workflow import WorkflowStatus
+
     workflow_service = get_workflow_service()
     workflow = workflow_service.get_workflow(workflow_id)
 
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
+
+    # 이미 완료된 워크플로우면 에러 반환
+    if workflow.status == WorkflowStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Survey already completed. View results instead."
+        )
+
+    # 이미 설문 실행 중이면 기존 job 상태 반환 (중복 실행 방지)
+    if workflow.status == WorkflowStatus.SURVEYING and workflow.survey_execution_job_id:
+        existing_job = _execution_jobs.get(workflow.survey_execution_job_id)
+        if not existing_job:
+            existing_job = _load_job_from_db(workflow.survey_execution_job_id)
+        if existing_job and existing_job.status in ["queued", "executing"]:
+            return existing_job
 
     if not workflow.product:
         raise HTTPException(status_code=400, detail="Product not set")
@@ -397,15 +421,24 @@ async def start_execution(
     concepts = workflow.concepts
     if not concepts:
         # Auto-create concept from product if none exist
+        product = workflow.product
+        product_name = product.name or "Unnamed Product"
+        product_desc = product.description or product_name
+        headline = product_desc[:200] if len(product_desc) > 200 else product_desc
+        target_market = product.target_market or "General consumers"
+        features = product.features or []
+        category = product.category or "General"
+        price_point = product.price_point or "Contact for pricing"
+
         concepts = [ConceptInput(
             id="CONCEPT_001",
-            title=workflow.product.name,
-            headline=workflow.product.description[:200] if len(workflow.product.description) > 200 else workflow.product.description,
-            consumer_insight=f"Target market: {workflow.product.target_market}",
-            benefit=", ".join(workflow.product.features[:3]) if workflow.product.features else "Key benefits",
-            rtb=f"Category: {workflow.product.category}",
-            image_description=f"Visual representation of {workflow.product.name}",
-            price=workflow.product.price_point or "Contact for pricing",
+            title=product_name,
+            headline=headline,
+            consumer_insight=f"Target market: {target_market}",
+            benefit=", ".join(features[:3]) if features else "Key product benefits",
+            rtb=f"Category: {category}",
+            image_description=f"Visual representation of {product_name}",
+            price=price_point,
         )]
 
     # Calculate total respondents (personas * concepts)

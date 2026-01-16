@@ -8,12 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 interface Workflow {
   id: string;
   status: string;
+  current_step: number;
   product?: {
     name: string;
     category: string;
     description: string;
   };
-  persona?: any;
+  core_persona?: any;
+  sample_size?: number;
+  concepts?: any[];
 }
 
 export default function NewWorkflowPage() {
@@ -43,6 +46,19 @@ export default function NewWorkflowPage() {
     }
   };
 
+  const getStepRoute = (step: number): string => {
+    const stepRoutes: Record<number, string> = {
+      1: "product",
+      2: "persona",
+      3: "confirm",
+      4: "sample-size",
+      5: "generating",
+      6: "concepts",
+      7: "executing",
+    };
+    return stepRoutes[step] || "product";
+  };
+
   const handleCreateWorkflow = async (copyFrom?: string) => {
     setCreating(true);
     try {
@@ -59,7 +75,8 @@ export default function NewWorkflowPage() {
       }
 
       const data = await response.json();
-      router.push(`/workflows/${data.workflow_id}/product`);
+      const route = getStepRoute(data.current_step);
+      router.push(`/workflows/${data.workflow_id}/${route}`);
     } catch (error) {
       console.error("Error creating workflow:", error);
       alert("Failed to create workflow");
@@ -81,37 +98,55 @@ export default function NewWorkflowPage() {
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {previousWorkflows.map((workflow) => (
-              <button
-                key={workflow.id}
-                type="button"
-                className={`w-full p-4 rounded-lg border-2 cursor-pointer transition-all text-left ${
-                  selectedWorkflow === workflow.id
-                    ? "border-blue-500 bg-blue-100"
-                    : "border-gray-200 bg-white hover:border-blue-300"
-                }`}
-                onClick={() => setSelectedWorkflow(workflow.id)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="font-semibold">
-                      {workflow.product?.name || "제품명 없음"}
+            {previousWorkflows.map((workflow) => {
+              const savedData = [];
+              if (workflow.product) savedData.push("제품");
+              if (workflow.core_persona) savedData.push("페르소나");
+              if (workflow.sample_size) savedData.push(`샘플 ${workflow.sample_size}명`);
+              if (workflow.concepts?.length) savedData.push(`컨셉 ${workflow.concepts.length}개`);
+
+              return (
+                <button
+                  key={workflow.id}
+                  type="button"
+                  className={`w-full p-4 rounded-lg border-2 cursor-pointer transition-all text-left ${
+                    selectedWorkflow === workflow.id
+                      ? "border-blue-500 bg-blue-100"
+                      : "border-gray-200 bg-white hover:border-blue-300"
+                  }`}
+                  onClick={() => setSelectedWorkflow(workflow.id)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="font-semibold">
+                        {workflow.product?.name || "제품명 없음"}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {workflow.product?.category || "카테고리 없음"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                        {workflow.product?.description || ""}
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {savedData.map((item) => (
+                          <span
+                            key={item}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800"
+                          >
+                            ✓ {item}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {workflow.product?.category || "카테고리 없음"}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                      {workflow.product?.description || ""}
-                    </div>
+                    {selectedWorkflow === workflow.id && (
+                      <div className="text-blue-600 text-sm font-semibold ml-4">
+                        선택됨 ✓
+                      </div>
+                    )}
                   </div>
-                  {selectedWorkflow === workflow.id && (
-                    <div className="text-blue-600 text-sm font-semibold ml-4">
-                      선택됨 ✓
-                    </div>
-                  )}
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
 
             <Button
               onClick={() =>

@@ -86,9 +86,15 @@ export default function ConceptsManagementPage() {
         const data = await response.json();
         setWorkflow(data);
         setConcepts(data.concepts || []);
+      } else {
+        // API 실패 시 빈 컨셉으로 시작
+        console.warn("Failed to create concept from product, using empty template");
+        setConcepts([emptyConceptTemplate("CONCEPT_001")]);
       }
     } catch (err) {
       console.error("Error creating concept from product:", err);
+      // 네트워크 오류 시에도 빈 컨셉으로 시작할 수 있도록 함
+      setConcepts([emptyConceptTemplate("CONCEPT_001")]);
     }
   };
 

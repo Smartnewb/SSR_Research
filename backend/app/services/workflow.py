@@ -295,12 +295,30 @@ class WorkflowService:
     def start_survey_execution(
         self, workflow_id: str, job_id: str
     ) -> SurveyWorkflow:
-        """Mark survey execution started (Step 6)."""
+        """Mark survey execution started (Step 7).
+
+        Sets the workflow status to SURVEYING and records the job ID.
+        Allows restarting from FAILED or CONCEPTS_MANAGEMENT states.
+        """
         workflow = self.get_workflow(workflow_id)
         if not workflow:
             raise ValueError(f"Workflow {workflow_id} not found")
 
+        # Allow starting from CONCEPTS_MANAGEMENT or FAILED (retry)
+        allowed_statuses = [
+            WorkflowStatus.CONCEPTS_MANAGEMENT,
+            WorkflowStatus.FAILED,
+            WorkflowStatus.SURVEYING,  # Allow restart
+        ]
+        if workflow.status not in allowed_statuses:
+            raise ValueError(
+                f"Cannot start survey execution in status {workflow.status}"
+            )
+
         workflow.survey_execution_job_id = job_id
+        workflow.status = WorkflowStatus.SURVEYING
+        workflow.current_step = 7
+        workflow.error_message = None  # Clear previous error
         workflow.updated_at = datetime.now(timezone.utc)
 
         self._workflows[workflow_id] = workflow
@@ -308,10 +326,18 @@ class WorkflowService:
         return workflow
 
     def complete_survey(self, workflow_id: str) -> SurveyWorkflow:
-        """Mark survey completed (Step 7)."""
+        """Mark survey completed (Step 7).
+
+        This method is idempotent - if the workflow is already COMPLETED,
+        it will return the workflow without raising an error.
+        """
         workflow = self.get_workflow(workflow_id)
         if not workflow:
             raise ValueError(f"Workflow {workflow_id} not found")
+
+        # Idempotent: if already completed, just return
+        if workflow.status == WorkflowStatus.COMPLETED:
+            return workflow
 
         if workflow.status != WorkflowStatus.SURVEYING:
             raise ValueError(

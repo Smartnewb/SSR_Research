@@ -259,7 +259,7 @@ export default function CorePersonaPage() {
         return Object.fromEntries(rounded);
       };
 
-      setFormData({
+      setFormData((prev) => ({
         age_range: data.refined_demographics.age_range,
         gender_distribution: normalizePercentages(data.refined_demographics.gender_distribution),
         income_brackets: normalizePercentages(data.refined_demographics.income_brackets),
@@ -268,7 +268,8 @@ export default function CorePersonaPage() {
         shopping_behavior: data.behavioral_insights.shopping_behavior,
         key_pain_points: data.psychographics.key_pain_points,
         decision_drivers: data.psychographics.decision_drivers,
-      });
+        currency: prev.currency,
+      }));
 
       setParsingProgress(100);
       setShowResearchModal(false);

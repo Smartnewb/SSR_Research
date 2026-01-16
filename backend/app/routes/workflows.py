@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..models.workflow import (
     SurveyWorkflow,
+    WorkflowStatus,
     ProductDescriptionRequest,
     ProductDescriptionAssistRequest,
     CorePersonaRequest,
@@ -78,11 +79,37 @@ async def create_workflow(copy_from: str = Query(None, description="Copy product
     if copy_from:
         try:
             source_workflow = service.get_workflow(copy_from)
-            if source_workflow.product:
-                workflow.product = ProductDescription(**source_workflow.product.model_dump())
-                workflow.current_step = 2
-            if source_workflow.persona:
-                workflow.persona = CorePersona(**source_workflow.persona.model_dump())
+            if source_workflow:
+                # Copy product
+                if source_workflow.product:
+                    workflow.product = ProductDescription(**source_workflow.product.model_dump())
+                    workflow.current_step = 2
+                    workflow.status = WorkflowStatus.PERSONA_BUILDING
+
+                # Copy core_persona
+                if source_workflow.core_persona:
+                    workflow.core_persona = CorePersona(**source_workflow.core_persona.model_dump())
+                    workflow.current_step = 4
+                    workflow.status = WorkflowStatus.SAMPLE_SIZE_SELECTION
+
+                # Copy sample_size - but need to regenerate personas (step 5)
+                if source_workflow.sample_size:
+                    workflow.sample_size = source_workflow.sample_size
+                    workflow.current_step = 5
+                    workflow.status = WorkflowStatus.GENERATING_PERSONAS
+
+                # Copy concepts (will be used after persona generation)
+                if source_workflow.concepts:
+                    workflow.concepts = [
+                        ConceptInput(**c.model_dump()) for c in source_workflow.concepts
+                    ]
+                    # Still need persona generation, so stay at step 5
+                    workflow.current_step = 5
+                    workflow.status = WorkflowStatus.GENERATING_PERSONAS
+
+                # Save updated workflow
+                service._save_to_database(workflow)
+                service._workflows[workflow.id] = workflow
         except Exception:
             # If copy fails, just create empty workflow
             pass

@@ -1,6 +1,6 @@
 """Research workflow API routes."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..services.gemini_research import (
@@ -51,9 +51,7 @@ class ParseResearchReportResponse(BaseModel):
 
 
 @router.post("/generate-prompt", response_model=GenerateResearchPromptResponse)
-async def generate_research_prompt(
-    request: GenerateResearchPromptRequest, use_mock: bool = Query(False)
-):
+async def generate_research_prompt(request: GenerateResearchPromptRequest):
     """Generate a research prompt for Gemini Deep Research.
 
     This endpoint creates a comprehensive research prompt based on:
@@ -63,26 +61,18 @@ async def generate_research_prompt(
     The prompt focuses on industry and market research to build an accurate
     target persona from scratch. User can copy this prompt and use it with
     Gemini Deep Research, then return the results for parsing.
+
+    Note: Always uses GPT to dynamically generate the research prompt.
     """
     try:
-        if use_mock:
-            result = await generate_gemini_research_prompt_mock(
-                product_category=request.product_category,
-                product_description=request.product_description,
-                product_name=request.product_name,
-                target_market=request.target_market,
-                price_point=request.price_point,
-                initial_persona_draft=request.initial_persona_draft,
-            )
-        else:
-            result = await generate_gemini_research_prompt(
-                product_category=request.product_category,
-                product_description=request.product_description,
-                product_name=request.product_name,
-                target_market=request.target_market,
-                price_point=request.price_point,
-                initial_persona_draft=request.initial_persona_draft,
-            )
+        result = await generate_gemini_research_prompt(
+            product_category=request.product_category,
+            product_description=request.product_description,
+            product_name=request.product_name,
+            target_market=request.target_market,
+            price_point=request.price_point,
+            initial_persona_draft=request.initial_persona_draft,
+        )
 
         return GenerateResearchPromptResponse(**result)
 
@@ -93,9 +83,7 @@ async def generate_research_prompt(
 
 
 @router.post("/parse-report", response_model=ParseResearchReportResponse)
-async def parse_research_report(
-    request: ParseResearchReportRequest, use_mock: bool = Query(False)
-):
+async def parse_research_report(request: ParseResearchReportRequest):
     """Parse Gemini Deep Research report and extract persona insights.
 
     This endpoint analyzes the research report from Gemini and extracts:
@@ -106,16 +94,13 @@ async def parse_research_report(
     - Confidence score and key findings
 
     These insights can be used to improve the core persona accuracy.
+
+    Note: Always uses GPT to dynamically parse the research report.
     """
     try:
-        if use_mock:
-            result = await parse_gemini_research_report_mock(
-                research_report=request.research_report
-            )
-        else:
-            result = await parse_gemini_research_report(
-                research_report=request.research_report
-            )
+        result = await parse_gemini_research_report(
+            research_report=request.research_report
+        )
 
         return ParseResearchReportResponse(**result)
 

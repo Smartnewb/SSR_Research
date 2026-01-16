@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -33,15 +33,79 @@ export default function ExecutingSurveyPage() {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // interval 참조를 저장하여 cleanup 시 정리
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  // 실행 시작 여부를 추적하여 중복 실행 방지
+  const hasStartedRef = useRef(false);
+
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    // 이미 폴링 중이면 중복 시작 방지
+    if (intervalRef.current) return;
+
+    intervalRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/api/workflows/${workflowId}/execute/status`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to get status");
+        }
+
+        const data = await response.json();
+        setStatus(data);
+
+        if (data.status === "completed") {
+          stopPolling();
+          setTimeout(() => {
+            router.push(`/workflows/${workflowId}/results`);
+          }, 1000);
+        }
+
+        if (data.status === "failed") {
+          stopPolling();
+          setError(data.error || "Execution failed");
+        }
+      } catch (err: any) {
+        console.error("Error polling status:", err);
+      }
+    }, 500);
+  }, [workflowId, router, stopPolling]);
+
   useEffect(() => {
+    // 이미 시작했으면 중복 실행 방지
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
     const fetchWorkflowAndStart = async () => {
       try {
         const workflowRes = await fetch(
           `http://localhost:8000/api/workflows/${workflowId}`
         );
-        if (workflowRes.ok) {
-          const workflowData = await workflowRes.json();
-          setWorkflow(workflowData);
+        if (!workflowRes.ok) {
+          throw new Error("Workflow not found");
+        }
+
+        const workflowData = await workflowRes.json();
+        setWorkflow(workflowData);
+
+        // 이미 완료된 워크플로우면 결과 페이지로 리다이렉트
+        if (workflowData.status === "completed") {
+          router.push(`/workflows/${workflowId}/results`);
+          return;
+        }
+
+        // 이미 설문이 실행 중이면 start_execution 호출하지 않고 pollStatus만 실행
+        if (workflowData.status === "surveying" && workflowData.survey_execution_job_id) {
+          startPolling();
+          return;
         }
 
         const response = await fetch(
@@ -56,47 +120,19 @@ export default function ExecutingSurveyPage() {
           throw new Error(errorData.detail || "Failed to start execution");
         }
 
-        pollStatus();
+        startPolling();
       } catch (err: any) {
         setError(err.message);
       }
     };
 
-    const pollStatus = () => {
-      const interval = setInterval(async () => {
-        try {
-          const response = await fetch(
-            `http://localhost:8000/api/workflows/${workflowId}/execute/status`
-          );
-
-          if (!response.ok) {
-            throw new Error("Failed to get status");
-          }
-
-          const data = await response.json();
-          setStatus(data);
-
-          if (data.status === "completed") {
-            clearInterval(interval);
-            setTimeout(() => {
-              router.push(`/workflows/${workflowId}/results`);
-            }, 1000);
-          }
-
-          if (data.status === "failed") {
-            clearInterval(interval);
-            setError(data.error || "Execution failed");
-          }
-        } catch (err: any) {
-          console.error("Error polling status:", err);
-        }
-      }, 500);
-
-      return () => clearInterval(interval);
-    };
-
     fetchWorkflowAndStart();
-  }, [workflowId, router]);
+
+    // Cleanup: 컴포넌트 언마운트 시 polling 중지
+    return () => {
+      stopPolling();
+    };
+  }, [workflowId, router, startPolling, stopPolling]);
 
   const getComparisonMode = () => {
     const conceptCount = workflow?.concepts?.length || 1;

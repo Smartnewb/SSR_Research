@@ -3,7 +3,9 @@
 import os
 from openai import AsyncOpenAI
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+from ..core.config import settings
+
+client = AsyncOpenAI(api_key=settings.openai_api_key)
 
 
 def _get_gemini_research_model() -> str:
@@ -81,19 +83,38 @@ Return a JSON object with:
 }}"""
 
     try:
-        response = await client.chat.completions.create(
-            model=_get_gemini_research_model(),
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a market research expert. Return only valid JSON.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            reasoning_effort="none",
-            temperature=0.7,
-            response_format={"type": "json_object"},
-        )
+        model = _get_gemini_research_model()
+
+        # GPT-5 family (gpt-5-nano, gpt-5-mini) doesn't support temperature/reasoning_effort="none"
+        # Only GPT-5.2/5.1 with reasoning_effort="none" supports temperature
+        if model.startswith("gpt-5."):
+            # GPT-5.2 or GPT-5.1: use reasoning_effort="none" with temperature
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a market research expert. Return only valid JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                reasoning_effort="none",
+                temperature=0.7,
+                response_format={"type": "json_object"},
+            )
+        else:
+            # GPT-5 family (gpt-5-nano, gpt-5-mini, etc.): no temperature/reasoning_effort params
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a market research expert. Return only valid JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
 
         content = response.choices[0].message.content
         if not content:

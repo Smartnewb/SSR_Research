@@ -204,6 +204,72 @@ class SSRPipeline:
 
         return aggregate_results(results)
 
+    def survey_single_persona(
+        self,
+        product_description: str,
+        persona_data: dict,
+        system_prompt: str,
+    ) -> SurveyResult:
+        """
+        Run survey for a single persona.
+
+        Args:
+            product_description: Product concept to evaluate
+            persona_data: Persona data dictionary
+            system_prompt: Pre-generated system prompt for the persona
+
+        Returns:
+            SurveyResult with response_text and ssr_score
+        """
+        self._ensure_initialized()
+
+        response = get_purchase_opinion_with_retry(
+            persona_system_prompt=system_prompt,
+            product_description=product_description,
+            model=self.llm_model,
+            client=self.client,
+        )
+
+        if response:
+            self.cost_tracker.record_call(
+                self.llm_model,
+                response.get("usage", {}),
+                response["cost"],
+            )
+
+            response_text = response["response_text"]
+
+            if self.embedding_cache:
+                embedding = self.embedding_cache.get(response_text)
+            else:
+                embedding = get_embedding(
+                    response_text,
+                    model=self.embedding_model,
+                    client=self.client,
+                )
+
+            ssr_score = float(self.ssr_calculator.calculate_simple(embedding))
+
+            return SurveyResult(
+                persona_id=persona_data.get("id", "unknown"),
+                response_text=response_text,
+                ssr_score=ssr_score,
+                persona_data=persona_data,
+                tokens_used=response["tokens_used"],
+                cost=response["cost"],
+                latency_ms=response["latency_ms"],
+            )
+
+        return SurveyResult(
+            persona_id=persona_data.get("id", "unknown"),
+            response_text="",
+            ssr_score=0.0,
+            persona_data=persona_data,
+            tokens_used=0,
+            cost=0.0,
+            latency_ms=0,
+        )
+
     def run_survey_mock(
         self,
         product_description: str,

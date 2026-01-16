@@ -1,10 +1,13 @@
 # GPT-5.2 Migration Report
 ## SSR Market Research Platform - Model Optimization
 
-**문서 버전:** 1.0
+**문서 버전:** 1.1
 **작성일:** 2026-01-17
+**수정일:** 2026-01-17
 **작성자:** AI Engineering Team
 **검토자:** CTO
+
+> **v1.1 변경사항:** CTO 피드백 반영 - Rollback 계획을 시나리오별로 분리 (API 호환성 이슈 명시)
 
 ---
 
@@ -220,18 +223,57 @@ grep -E "CONCEPT_MODEL|GEMINI_RESEARCH_MODEL|PERSONA_MODEL" .env
 
 ## 6. Rollback 계획
 
-문제 발생 시 환경변수만 변경하여 즉시 롤백 가능:
+### 6.1 시나리오 A: 모델 성능/비용 이슈 (단순 모델 교체)
+
+**대상:** Chat Completions API 유지 서비스 (gpt-5-nano 사용)
+- Survey Execution (`survey.py`)
+- Persona Generation (`persona_generation.py`)
+- Concept Generation (`concept.py`)
+- Pipeline 기본 작업 (`pipeline.py`, `ab_testing.py`)
+
+**방법:** 환경변수만 변경 (코드 수정 불필요)
 
 ```bash
-# 롤백 시 .env 설정
-LLM_MODEL=gpt-4o-mini
+# .env 설정 변경
 SURVEY_MODEL=gpt-4o-mini
 CONCEPT_MODEL=gpt-4o-mini
 GEMINI_RESEARCH_MODEL=gpt-4o-mini
 PERSONA_MODEL=gpt-4o-mini
 ```
 
-**참고:** Responses API 마이그레이션은 코드 레벨 롤백 필요 (Git revert)
+**복구 시간:** 즉시 (서버 재시작만 필요)
+
+### 6.2 시나리오 B: API 호환성 이슈 (Critical Error)
+
+**대상:** Responses API로 마이그레이션된 서비스 (gpt-5.2 사용)
+- Analysis Service (`analysis.py`)
+- Research Service (`research.py`)
+
+**주의:** `gpt-4o-mini`는 Responses API(`client.responses.create`)를 지원하지 않습니다. 환경변수만 변경하면 API 호출 에러가 발생합니다.
+
+**방법:** Git Revert 필수
+
+```bash
+# 1. 마이그레이션 커밋 확인
+git log --oneline backend/app/services/analysis.py
+git log --oneline backend/app/services/research.py
+
+# 2. 해당 커밋 revert
+git revert <commit-hash>
+
+# 3. 환경변수 변경
+ANALYSIS_MODEL=gpt-4o-mini
+RESEARCH_MODEL=gpt-4o-mini
+```
+
+**복구 시간:** 약 10-15분 (코드 배포 필요)
+
+### 6.3 롤백 시나리오 요약
+
+| 서비스 | API 방식 | 롤백 방법 | 복구 시간 |
+|--------|----------|----------|----------|
+| Survey, Persona, Concept | Chat Completions | 환경변수 변경 | 즉시 |
+| Analysis, Research | Responses API | Git Revert + 배포 | 10-15분 |
 
 ---
 
@@ -260,7 +302,7 @@ PERSONA_MODEL=gpt-4o-mini
 3. **비용 최적화 (gpt-5-nano 기본값 적용)**
 4. **코드 품질 향상 (하드코딩 제거)**
 
-모든 변경사항은 하위 호환성을 유지하며, 환경변수를 통해 즉시 롤백 가능합니다.
+Chat Completions API 사용 서비스는 환경변수 변경으로 즉시 롤백 가능하며, Responses API 마이그레이션 서비스는 Git Revert를 통해 10-15분 내 복구 가능합니다.
 
 ---
 
