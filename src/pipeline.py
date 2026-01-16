@@ -1,9 +1,15 @@
 """Main pipeline orchestrating all components."""
 
+import os
 from typing import Optional, Callable
 
 import numpy as np
 from tqdm import tqdm
+
+
+def _get_default_llm_model() -> str:
+    """Get default LLM model from environment or fallback."""
+    return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
 
 from .personas.generator import (
     Persona,
@@ -39,7 +45,7 @@ class SSRPipeline:
 
     def __init__(
         self,
-        llm_model: str = "gpt-4o-mini",
+        llm_model: Optional[str] = None,
         embedding_model: str = "text-embedding-3-small",
         enable_caching: bool = True,
         llm_client: Optional["openai.OpenAI"] = None,
@@ -48,12 +54,12 @@ class SSRPipeline:
         Initialize pipeline.
 
         Args:
-            llm_model: Model for text generation
+            llm_model: Model for text generation (default from env or gpt-5-nano)
             embedding_model: Model for embeddings
             enable_caching: Whether to cache embeddings
             llm_client: Optional OpenAI client
         """
-        self.llm_model = llm_model
+        self.llm_model = llm_model or _get_default_llm_model()
         self.embedding_model = embedding_model
         self.enable_caching = enable_caching
         self._client = llm_client
@@ -328,7 +334,7 @@ def run_survey(
     product_description: str,
     sample_size: int = 100,
     demographics: Optional[dict] = None,
-    llm_model: str = "gpt-4o-mini",
+    llm_model: Optional[str] = None,
 ) -> AggregatedResults:
     """
     Convenience function to run a survey.
@@ -337,12 +343,12 @@ def run_survey(
         product_description: Product concept to evaluate
         sample_size: Number of respondents
         demographics: Optional demographic filters
-        llm_model: LLM model to use
+        llm_model: LLM model to use (default from env or gpt-5-nano)
 
     Returns:
         Aggregated results
     """
-    pipeline = SSRPipeline(llm_model=llm_model)
+    pipeline = SSRPipeline(llm_model=llm_model or _get_default_llm_model())
     return pipeline.run_survey(
         product_description=product_description,
         sample_size=sample_size,
@@ -355,7 +361,7 @@ def run_ab_test(
     product_b: str,
     sample_size: int = 50,
     demographics: Optional[dict] = None,
-    llm_model: str = "gpt-4o-mini",
+    llm_model: Optional[str] = None,
     show_progress: bool = True,
 ) -> ABTestResults:
     """
@@ -368,12 +374,13 @@ def run_ab_test(
         product_b: Second product description
         sample_size: Number of respondents per product
         demographics: Optional demographic filters
-        llm_model: LLM model to use
+        llm_model: LLM model to use (default from env or gpt-5-nano)
         show_progress: Whether to show progress bar
 
     Returns:
         ABTestResults with comparison data
     """
+    llm_model = llm_model or _get_default_llm_model()
     pipeline = SSRPipeline(llm_model=llm_model)
     pipeline.initialize()
 

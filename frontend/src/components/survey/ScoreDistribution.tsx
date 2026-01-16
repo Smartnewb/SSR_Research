@@ -51,7 +51,7 @@ export function ScoreDistribution({ distribution }: ScoreDistributionProps) {
               />
               <YAxis allowDecimals={false} />
               <Tooltip
-                formatter={(value: number) => [`${value} respondents`, "Count"]}
+                formatter={(value) => [`${Number(value)} respondents`, "Count"]}
                 labelFormatter={(label) => `Score Range: ${label}`}
               />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>

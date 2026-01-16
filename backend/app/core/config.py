@@ -21,7 +21,15 @@ class Settings(BaseSettings):
 
     openai_api_key: Optional[str] = None
 
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-5-nano"
+    survey_model: str = "gpt-5-nano"
+    survey_reasoning_effort: str = "none"
+    analysis_model: str = "gpt-5.2"
+    analysis_reasoning_effort: str = "high"
+    analysis_verbosity: str = "medium"
+    research_model: str = "gpt-5.2"
+    research_reasoning_effort: str = "medium"
+    product_model: str = "gpt-5-nano"
     embedding_model: str = "text-embedding-3-small"
 
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

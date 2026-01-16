@@ -69,9 +69,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model", "-m",
         type=str,
-        default="gpt-4o-mini",
-        choices=["gpt-4o-mini", "gpt-5-mini", "gpt-5.2"],
-        help="LLM model to use (default: gpt-4o-mini)",
+        default="gpt-5-nano",
+        choices=["gpt-5-nano", "gpt-5-mini", "gpt-5.2", "gpt-4o-mini"],
+        help="LLM model to use (default: gpt-5-nano)",
     )
 
     parser.add_argument(

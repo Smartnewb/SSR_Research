@@ -1,13 +1,13 @@
 "use client";
 
-import { BarChart3, Clock, DollarSign, Hash, TrendingUp } from "lucide-react";
+import { BarChart3, Clock, DollarSign, TrendingUp } from "lucide-react";
 import type { SurveyResponse } from "@/lib/types";
 import { formatCost, formatDuration, getScoreColor } from "@/lib/api";
 import { MetricCard } from "./MetricCard";
 import { ScoreDistribution } from "./ScoreDistribution";
 import { ResponseTable } from "./ResponseTable";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface ResultsDashboardProps {
   results: SurveyResponse;

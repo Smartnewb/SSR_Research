@@ -39,9 +39,9 @@ def create_sidebar():
 
     model = st.sidebar.selectbox(
         "LLM Model",
-        ["gpt-4o-mini", "gpt-5-mini", "gpt-5.2"],
+        ["gpt-5-nano", "gpt-5-mini", "gpt-5.2", "gpt-4o-mini"],
         index=0,
-        help="gpt-4o-mini is most cost-effective",
+        help="gpt-5-nano is most cost-effective",
     )
 
     sample_size = st.sidebar.slider(

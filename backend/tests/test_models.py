@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.models.request import SurveyRequest, ABTestRequest, DemographicsFilter
-from backend.app.models.response import SurveyResponse, SurveyResultItem
+from backend.app.models.response import SurveyResultItem
 
 
 class TestSurveyRequest:

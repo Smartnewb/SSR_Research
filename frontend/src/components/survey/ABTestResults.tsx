@@ -7,7 +7,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -150,7 +149,7 @@ export function ABTestResults({ results, onReset }: ABTestResultsProps) {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" domain={[0, 100]} unit="%" />
                 <YAxis type="category" dataKey="name" width={100} />
-                <Tooltip formatter={(value: number) => [`${value.toFixed(1)}%`, "Score"]} />
+                <Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Score"]} />
                 <Bar dataKey="score" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -175,7 +174,7 @@ export function ABTestResults({ results, onReset }: ABTestResultsProps) {
               <p className="text-xl font-semibold">{statistics.p_value.toFixed(4)}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Effect Size (Cohen's d)</p>
+              <p className="text-sm text-muted-foreground">Effect Size (Cohen&apos;s d)</p>
               <p className="text-xl font-semibold">{statistics.effect_size.toFixed(3)}</p>
             </div>
             <div>

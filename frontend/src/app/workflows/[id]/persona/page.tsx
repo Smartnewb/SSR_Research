@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { ArrowLeft } from "lucide-react";
 
 export default function CorePersonaPage() {
   const params = useParams();
@@ -18,12 +19,13 @@ export default function CorePersonaPage() {
   const [formData, setFormData] = useState({
     age_range: [25, 45] as [number, number],
     gender_distribution: { female: 50, male: 50 },
-    income_brackets: { low: 30, mid: 50, high: 20 },
+    income_brackets: { none: 10, low: 25, mid: 45, high: 20 },
     location: "urban",
     category_usage: "medium",
     shopping_behavior: "smart_shopper",
     key_pain_points: [] as string[],
     decision_drivers: [] as string[],
+    currency: "KRW" as "KRW" | "USD",
   });
 
   const [painPointInput, setPainPointInput] = useState("");
@@ -69,7 +71,7 @@ export default function CorePersonaPage() {
               personaData.gender_distribution || { female: 0.5, male: 0.5 }
             ),
             income_brackets: convertToPercentage(
-              personaData.income_brackets || { low: 0.3, mid: 0.5, high: 0.2 }
+              personaData.income_brackets || { none: 0.1, low: 0.25, mid: 0.45, high: 0.2 }
             ),
             location: personaData.location || "urban",
             category_usage: personaData.category_usage || "medium",
@@ -77,6 +79,7 @@ export default function CorePersonaPage() {
               personaData.shopping_behavior || "smart_shopper",
             key_pain_points: personaData.key_pain_points || [],
             decision_drivers: personaData.decision_drivers || [],
+            currency: personaData.currency || "KRW",
           });
           setDataLoaded(true);
         }
@@ -163,6 +166,7 @@ export default function CorePersonaPage() {
             male: formData.gender_distribution.male / 100,
           },
           income_brackets: {
+            none: formData.income_brackets.none / 100,
             low: formData.income_brackets.low / 100,
             mid: formData.income_brackets.mid / 100,
             high: formData.income_brackets.high / 100,
@@ -291,10 +295,12 @@ export default function CorePersonaPage() {
           male: formData.gender_distribution.male / 100,
         },
         income_brackets: {
+          none: formData.income_brackets.none / 100,
           low: formData.income_brackets.low / 100,
           mid: formData.income_brackets.mid / 100,
           high: formData.income_brackets.high / 100,
         },
+        currency: formData.currency,
       };
 
       const response = await fetch(
@@ -323,6 +329,16 @@ export default function CorePersonaPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push(`/workflows/${workflowId}/product`)}
+        className="mb-2"
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        제품 정보 수정
+      </Button>
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Step 2: 핵심 페르소나 정의</h1>
         <div className="text-sm text-muted-foreground">7단계 중 2단계</div>
@@ -586,13 +602,80 @@ export default function CorePersonaPage() {
           </div>
 
           <div className="space-y-2">
+            <Label>통화 설정 *</Label>
+            <p className="text-sm text-muted-foreground">
+              소득 단위를 선택하세요. 통화에 따라 시스템 프롬프트 언어가 변경됩니다.
+            </p>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="currency"
+                  value="KRW"
+                  checked={formData.currency === "KRW"}
+                  onChange={() => setFormData({ ...formData, currency: "KRW" })}
+                  className="w-4 h-4"
+                />
+                <span className="font-medium">🇰🇷 KRW (원)</span>
+                <span className="text-sm text-muted-foreground">- 한국어 프롬프트</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="currency"
+                  value="USD"
+                  checked={formData.currency === "USD"}
+                  onChange={() => setFormData({ ...formData, currency: "USD" })}
+                  className="w-4 h-4"
+                />
+                <span className="font-medium">🇺🇸 USD ($)</span>
+                <span className="text-sm text-muted-foreground">- 영어 프롬프트</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <Label>소득 분포 (%) *</Label>
             <p className="text-sm text-muted-foreground">
               타겟 고객의 소득 수준 분포를 설정하세요. 합계가 100%가 되어야 합니다.
+              {formData.currency === "KRW" ? " (월 가처분 소득 기준)" : " (Monthly disposable income)"}
             </p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-4">
               <div className="space-y-1">
-                <Label className="text-sm font-medium">저소득 (5천만원 이하)</Label>
+                <Label className="text-sm font-medium">
+                  {formData.currency === "KRW" ? "무소득/학생" : "Minimal"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {formData.currency === "KRW" ? "0~30만원" : "$0-$500"}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={formData.income_brackets.none}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        income_brackets: {
+                          ...formData.income_brackets,
+                          none: parseInt(e.target.value) || 0,
+                        },
+                      })
+                    }
+                    onFocus={handleNumberInputFocus}
+                    className="w-20"
+                  />
+                  <span className="text-sm text-muted-foreground">%</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  {formData.currency === "KRW" ? "저소득" : "Low"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {formData.currency === "KRW" ? "30~70만원" : "$500-$2,000"}
+                </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
@@ -604,7 +687,7 @@ export default function CorePersonaPage() {
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          low: parseInt(e.target.value) || 0,
+                          low: Number.parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -615,7 +698,12 @@ export default function CorePersonaPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <Label className="text-sm font-medium">중소득 (5천~1억)</Label>
+                <Label className="text-sm font-medium">
+                  {formData.currency === "KRW" ? "중소득" : "Middle"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {formData.currency === "KRW" ? "70~120만원" : "$2,000-$5,000"}
+                </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
@@ -627,7 +715,7 @@ export default function CorePersonaPage() {
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          mid: parseInt(e.target.value) || 0,
+                          mid: Number.parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -638,7 +726,12 @@ export default function CorePersonaPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <Label className="text-sm font-medium">고소득 (1억 이상)</Label>
+                <Label className="text-sm font-medium">
+                  {formData.currency === "KRW" ? "고소득" : "High"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {formData.currency === "KRW" ? "120~200만원" : "$5,000-$10,000"}
+                </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
@@ -650,7 +743,7 @@ export default function CorePersonaPage() {
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          high: parseInt(e.target.value) || 0,
+                          high: Number.parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -663,9 +756,9 @@ export default function CorePersonaPage() {
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                현재 합계: {formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high}%
+                현재 합계: {formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high}%
               </span>
-              {formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100 && (
+              {formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100 && (
                 <span className="text-destructive font-medium">⚠ 합계가 100%가 되어야 합니다</span>
               )}
             </div>
@@ -787,7 +880,7 @@ export default function CorePersonaPage() {
               formData.key_pain_points.length === 0 ||
               formData.decision_drivers.length === 0 ||
               formData.gender_distribution.female + formData.gender_distribution.male !== 100 ||
-              formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100
+              formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100
             }
             className="w-full"
             size="lg"
@@ -795,7 +888,7 @@ export default function CorePersonaPage() {
             {loading ? "저장 중..." : "✓ 페르소나 확정하고 다음 단계로"}
           </Button>
           {(formData.gender_distribution.female + formData.gender_distribution.male !== 100 ||
-            formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100) && (
+            formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100) && (
             <p className="text-sm text-destructive text-center">
               ⚠ 성별 분포와 소득 분포의 합계가 각각 100%가 되어야 합니다
             </p>

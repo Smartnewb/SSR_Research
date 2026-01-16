@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft } from "lucide-react";
 
 export default function ConfirmPersonaPage() {
   const params = useParams();
@@ -71,6 +72,16 @@ export default function ConfirmPersonaPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push(`/workflows/${workflowId}/persona`)}
+        className="mb-2"
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        페르소나 수정
+      </Button>
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Step 3: Confirm Core Persona</h1>
         <div className="text-sm text-muted-foreground">Step 3 of 7</div>

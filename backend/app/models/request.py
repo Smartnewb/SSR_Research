@@ -65,7 +65,7 @@ class SurveyRequest(BaseModel):
         description="Use mock data (no API calls)",
     )
     model: str = Field(
-        "gpt-4o-mini",
+        "gpt-5-nano",
         description="LLM model to use",
     )
 
@@ -122,7 +122,7 @@ class ABTestRequest(BaseModel):
         description="Use mock data (no API calls)",
     )
     model: str = Field(
-        "gpt-4o-mini",
+        "gpt-5-nano",
         description="LLM model to use",
     )
 

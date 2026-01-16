@@ -1,10 +1,21 @@
 """Survey execution module for LLM interactions."""
 
+import os
 import time
 from typing import Optional
 
 from .prompts import create_survey_prompt, create_reinforced_prompt
 from .validator import validate_llm_response
+
+
+def _get_default_model() -> str:
+    """Get default model from environment or fallback."""
+    return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
+
+
+def _get_reasoning_effort() -> str:
+    """Get reasoning effort from environment or fallback."""
+    return os.getenv("SURVEY_REASONING_EFFORT", "none")
 
 
 PRICING = {
@@ -26,6 +37,26 @@ PRICING = {
         "output": 0.40 / 1_000_000,
     },
 }
+
+GPT5_MODELS = {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.2"}
+
+
+def supports_temperature(model: str, reasoning_effort: str = "none") -> bool:
+    """Check if model supports temperature parameter.
+
+    Per GPT-5.2 docs: temperature, top_p, logprobs are ONLY supported
+    when reasoning_effort is set to "none".
+
+    Args:
+        model: Model name
+        reasoning_effort: Current reasoning effort setting
+
+    Returns:
+        True if temperature can be used
+    """
+    if model not in GPT5_MODELS:
+        return True
+    return reasoning_effort == "none"
 
 
 def calculate_cost(model: str, usage: dict) -> float:
@@ -60,9 +91,10 @@ def calculate_cost(model: str, usage: dict) -> float:
 def get_purchase_opinion(
     persona_system_prompt: str,
     product_description: str,
-    model: str = "gpt-4o-mini",
+    model: Optional[str] = None,
     max_tokens: int = 200,
     temperature: float = 0.7,
+    reasoning_effort: Optional[str] = None,
     client: Optional["openai.OpenAI"] = None,
 ) -> dict:
     """
@@ -71,9 +103,10 @@ def get_purchase_opinion(
     Args:
         persona_system_prompt: System prompt enforcing persona identity
         product_description: Product concept to evaluate
-        model: OpenAI model name
+        model: OpenAI model name (default from env SURVEY_MODEL or LLM_MODEL)
         max_tokens: Max response length
-        temperature: Sampling temperature
+        temperature: Sampling temperature (only used when reasoning_effort=none)
+        reasoning_effort: Reasoning effort level (none/low/medium/high/xhigh)
         client: Optional OpenAI client
 
     Returns:
@@ -89,19 +122,26 @@ def get_purchase_opinion(
         import openai
         client = openai.OpenAI()
 
+    model = model or _get_default_model()
+    reasoning_effort = reasoning_effort or _get_reasoning_effort()
+
     start_time = time.time()
 
     user_prompt = create_survey_prompt(product_description)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    api_params = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": persona_system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
+        "max_tokens": max_tokens,
+    }
+
+    if supports_temperature(model, reasoning_effort):
+        api_params["temperature"] = temperature
+
+    response = client.chat.completions.create(**api_params)
 
     response_text = response.choices[0].message.content.strip()
 
@@ -128,7 +168,8 @@ def get_purchase_opinion_with_retry(
     product_description: str,
     max_retries: int = 3,
     backoff_factor: float = 2.0,
-    model: str = "gpt-4o-mini",
+    model: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
     client: Optional["openai.OpenAI"] = None,
 ) -> Optional[dict]:
     """
@@ -141,7 +182,8 @@ def get_purchase_opinion_with_retry(
         product_description: Product concept
         max_retries: Maximum retry attempts
         backoff_factor: Backoff multiplier
-        model: Model name
+        model: Model name (default from env)
+        reasoning_effort: Reasoning effort level
         client: Optional OpenAI client
 
     Returns:
@@ -149,6 +191,8 @@ def get_purchase_opinion_with_retry(
     """
     import openai
 
+    model = model or _get_default_model()
+    reasoning_effort = reasoning_effort or _get_reasoning_effort()
     reinforced = False
 
     for attempt in range(max_retries):
@@ -163,15 +207,19 @@ def get_purchase_opinion_with_retry(
 
             start_time = time.time()
 
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
+            api_params = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": persona_system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=200,
-                temperature=0.7,
-            )
+                "max_tokens": 200,
+            }
+
+            if supports_temperature(model, reasoning_effort):
+                api_params["temperature"] = 0.7
+
+            response = client.chat.completions.create(**api_params)
 
             response_text = response.choices[0].message.content.strip()
 
@@ -192,10 +240,10 @@ def get_purchase_opinion_with_retry(
                     "usage": usage,
                     "attempts": attempt + 1,
                 }
-            else:
-                if "numeric rating" in error_msg and attempt < max_retries - 1:
-                    reinforced = True
-                    continue
+
+            if "numeric rating" in error_msg and attempt < max_retries - 1:
+                reinforced = True
+                continue
 
         except openai.RateLimitError:
             wait_time = backoff_factor ** attempt

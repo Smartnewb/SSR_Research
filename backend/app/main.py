@@ -6,7 +6,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import settings
-from .routes import surveys_router, health_router, websocket_router
+from .routes import (
+    surveys_router,
+    health_router,
+    websocket_router,
+    research_router,
+    personas_router,
+    concepts_router,
+    comparison_router,
+    workflows_router,
+    research_workflow_router,
+    generation_router,
+    execution_router,
+    websocket_workflow_router,
+)
 
 
 @asynccontextmanager
@@ -27,6 +40,8 @@ the Semantic Similarity Rating (SSR) method.
 - A/B testing for product comparisons
 - Demographic targeting
 - Real-time progress tracking (WebSocket)
+- AI-guided persona research assistant
+- Product concept card builder
 
 ## Quick Start
 1. Use mock mode for testing (no API key required)
@@ -48,3 +63,12 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(surveys_router)
 app.include_router(websocket_router)
+app.include_router(research_router)
+app.include_router(personas_router)
+app.include_router(concepts_router)
+app.include_router(comparison_router)
+app.include_router(workflows_router)
+app.include_router(research_workflow_router)
+app.include_router(generation_router)
+app.include_router(execution_router)
+app.include_router(websocket_workflow_router)

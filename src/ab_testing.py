@@ -1,5 +1,6 @@
 """A/B testing module for comparing product concepts."""
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,6 +8,11 @@ import numpy as np
 from scipy import stats
 
 from .pipeline import SSRPipeline
+
+
+def _get_default_llm_model() -> str:
+    """Get default LLM model from environment or fallback."""
+    return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
 from .reporting.aggregator import AggregatedResults
 
 
@@ -104,7 +110,7 @@ def run_ab_test(
     sample_size: int = 50,
     product_a_name: str = "Product A",
     product_b_name: str = "Product B",
-    llm_model: str = "gpt-4o-mini",
+    llm_model: Optional[str] = None,
     target_demographics: Optional[dict] = None,
     significance_level: float = 0.05,
     use_mock: bool = False,
@@ -119,7 +125,7 @@ def run_ab_test(
         sample_size: Number of respondents per product
         product_a_name: Display name for product A
         product_b_name: Display name for product B
-        llm_model: LLM model to use
+        llm_model: LLM model to use (default from env or gpt-5-nano)
         target_demographics: Optional demographic filters
         significance_level: Alpha level for statistical test
         use_mock: Whether to use mock data
@@ -128,6 +134,7 @@ def run_ab_test(
     Returns:
         ABTestResult with comparison statistics
     """
+    llm_model = llm_model or _get_default_llm_model()
     pipeline = SSRPipeline(llm_model=llm_model)
 
     if use_mock:

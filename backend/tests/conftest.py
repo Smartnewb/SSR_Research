@@ -1,20 +1,6 @@
 """Pytest configuration and fixtures."""
 
-import sys
-from pathlib import Path
-
 import pytest
-from fastapi.testclient import TestClient
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from backend.app.main import app
-
-
-@pytest.fixture
-def client():
-    """Create a test client for the FastAPI app."""
-    return TestClient(app)
 
 
 @pytest.fixture
@@ -40,3 +26,11 @@ def mock_ab_test_request():
         "use_mock": True,
         "model": "gpt-4o-mini",
     }
+
+
+@pytest.fixture
+def client():
+    """Create a test client for the FastAPI app."""
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+    return TestClient(app)

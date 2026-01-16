@@ -220,6 +220,31 @@ curl -X POST http://localhost:8000/api/surveys/compare \
   }'
 ```
 
+### WebSocket Real-time Progress
+```javascript
+// Connect to WebSocket for real-time progress
+const ws = new WebSocket('ws://localhost:8000/ws/surveys/{survey_id}');
+
+// Start survey via WebSocket
+ws.send(JSON.stringify({
+  action: "start",
+  request: {
+    product_description: "Smart coffee mug - $79",
+    sample_size: 10,
+    use_mock: true
+  }
+}));
+
+// Receive progress updates
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  // data.type: "progress" | "result" | "error"
+  // data.progress: 0-100 (percentage)
+  // data.current_persona: current persona number
+  // data.total_personas: total personas
+};
+```
+
 ### Backend Project Structure
 ```
 backend/
@@ -242,3 +267,82 @@ backend/
 │   └── test_models.py
 └── requirements.txt
 ```
+
+---
+
+## Frontend (Next.js)
+
+### Run Frontend Development Server
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
+
+### Frontend Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Home page with features overview |
+| `/surveys/new` | Single survey form and results |
+| `/surveys/compare` | A/B testing form and results |
+
+### Frontend Project Structure
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx       # Root layout with header
+│   │   ├── page.tsx         # Home page
+│   │   └── surveys/
+│   │       ├── new/page.tsx     # Single survey
+│   │       └── compare/page.tsx # A/B testing
+│   ├── components/
+│   │   ├── ui/              # shadcn/ui components
+│   │   └── survey/          # Survey-specific components
+│   │       ├── SurveyForm.tsx
+│   │       ├── ABTestForm.tsx
+│   │       ├── ResultsDashboard.tsx
+│   │       ├── ABTestResults.tsx
+│   │       ├── ScoreDistribution.tsx
+│   │       ├── ResponseTable.tsx
+│   │       └── MetricCard.tsx
+│   ├── lib/
+│   │   ├── api.ts           # API client (axios)
+│   │   ├── types.ts         # TypeScript types
+│   │   └── utils.ts         # Utilities
+│   └── hooks/
+│       └── useSurvey.ts     # React Query mutations
+└── package.json
+```
+
+### Environment Variables
+Create `frontend/.env.local`:
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+---
+
+## Full Stack Development
+
+### Run Both Servers
+```bash
+# Terminal 1: Backend
+uvicorn backend.app.main:app --reload --port 8000
+
+# Terminal 2: Frontend
+cd frontend && npm run dev
+```
+
+Then open http://localhost:3000

@@ -25,7 +25,7 @@ from ..models.response import (
 class SurveyService:
     """Service for running surveys and A/B tests."""
 
-    def __init__(self, llm_model: str = "gpt-4o-mini"):
+    def __init__(self, llm_model: str = "gpt-5-nano"):
         self.llm_model = llm_model
         self.pipeline = SSRPipeline(llm_model=llm_model)
 

@@ -1,0 +1,230 @@
+"use client";
+
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, FlaskConical } from "lucide-react";
+
+interface ExecutionStatus {
+  job_id: string;
+  workflow_id: string;
+  status: string;
+  total_respondents: number;
+  completed_count: number;
+  progress: number;
+  error?: string;
+}
+
+interface Workflow {
+  id: string;
+  status: string;
+  concepts?: Array<{ id: string; title: string }>;
+}
+
+export default function ExecutingSurveyPage() {
+  const params = useParams();
+  const router = useRouter();
+  const workflowId = params.id as string;
+
+  const [status, setStatus] = useState<ExecutionStatus | null>(null);
+  const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchWorkflowAndStart = async () => {
+      try {
+        const workflowRes = await fetch(
+          `http://localhost:8000/api/workflows/${workflowId}`
+        );
+        if (workflowRes.ok) {
+          const workflowData = await workflowRes.json();
+          setWorkflow(workflowData);
+        }
+
+        const response = await fetch(
+          `http://localhost:8000/api/workflows/${workflowId}/execute/start?use_mock=true`,
+          {
+            method: "POST",
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || "Failed to start execution");
+        }
+
+        pollStatus();
+      } catch (err: any) {
+        setError(err.message);
+      }
+    };
+
+    const pollStatus = () => {
+      const interval = setInterval(async () => {
+        try {
+          const response = await fetch(
+            `http://localhost:8000/api/workflows/${workflowId}/execute/status`
+          );
+
+          if (!response.ok) {
+            throw new Error("Failed to get status");
+          }
+
+          const data = await response.json();
+          setStatus(data);
+
+          if (data.status === "completed") {
+            clearInterval(interval);
+            setTimeout(() => {
+              router.push(`/workflows/${workflowId}/results`);
+            }, 1000);
+          }
+
+          if (data.status === "failed") {
+            clearInterval(interval);
+            setError(data.error || "Execution failed");
+          }
+        } catch (err: any) {
+          console.error("Error polling status:", err);
+        }
+      }, 500);
+
+      return () => clearInterval(interval);
+    };
+
+    fetchWorkflowAndStart();
+  }, [workflowId, router]);
+
+  const getComparisonMode = () => {
+    const conceptCount = workflow?.concepts?.length || 1;
+    if (conceptCount === 1) return { label: "단일 설문", color: "bg-blue-500" };
+    if (conceptCount === 2) return { label: "A/B 테스팅", color: "bg-purple-500" };
+    return { label: `Multi-Compare`, color: "bg-orange-500" };
+  };
+
+  const mode = getComparisonMode();
+  const conceptCount = workflow?.concepts?.length || 1;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push(`/workflows/${workflowId}/concepts`)}
+        className="mb-2"
+        disabled={status?.status === "executing"}
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        컨셉 관리
+      </Button>
+
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Step 7: 설문 실행 중</h1>
+        <div className="text-sm text-muted-foreground">7단계 중 7단계</div>
+      </div>
+
+      {workflow?.concepts && workflow.concepts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <FlaskConical className="h-5 w-5" />
+              테스트 정보
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 mb-4">
+              <Badge className={`${mode.color} text-white`}>{mode.label}</Badge>
+              <span className="text-sm text-muted-foreground">
+                {conceptCount}개 컨셉 테스트 중
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {workflow.concepts.map((concept, idx) => (
+                <Badge key={concept.id} variant="outline">
+                  {idx + 1}. {concept.title || concept.id}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>설문 진행 상황</CardTitle>
+          <CardDescription>
+            {conceptCount > 1
+              ? `${conceptCount}개 컨셉에 대해 각 페르소나의 반응을 수집하고 있습니다`
+              : "각 페르소나가 제품에 대한 의견을 제공하고 있습니다"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {error ? (
+            <div className="bg-destructive/10 border border-destructive text-destructive p-4 rounded">
+              <p className="font-semibold mb-1">오류 발생</p>
+              <p className="text-sm">{error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => router.push(`/workflows/${workflowId}/concepts`)}
+              >
+                컨셉 관리로 돌아가기
+              </Button>
+            </div>
+          ) : status ? (
+            <>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>
+                    상태: <span className="font-semibold capitalize">{status.status}</span>
+                  </span>
+                  <span>
+                    {status.completed_count} / {status.total_respondents} 응답
+                  </span>
+                </div>
+                <Progress value={status.progress * 100} className="h-3" />
+                <div className="text-right text-xs text-muted-foreground">
+                  {(status.progress * 100).toFixed(1)}%
+                </div>
+              </div>
+
+              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+                <h4 className="font-semibold text-sm">현재 진행 중인 작업</h4>
+                <p className="text-sm text-muted-foreground">
+                  {conceptCount === 1 && (
+                    "각 페르소나가 제품 설명을 검토하고 의견을 제공합니다. SSR(의미적 유사도 평점) 점수로 구매 의향을 측정합니다."
+                  )}
+                  {conceptCount === 2 && (
+                    "각 페르소나가 두 컨셉을 비교 평가합니다. t-test를 통해 통계적으로 유의미한 차이가 있는지 분석합니다."
+                  )}
+                  {conceptCount >= 3 && (
+                    `${conceptCount}개 컨셉에 대한 평가를 수집하고 있습니다. ANOVA 분석을 통해 컨셉 간 유의미한 차이를 파악합니다.`
+                  )}
+                </p>
+              </div>
+
+              {status.status === "completed" && (
+                <div className="text-center space-y-2 py-4">
+                  <div className="text-green-600 font-semibold text-lg">
+                    ✓ 설문 완료!
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    결과 페이지로 이동합니다...
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center text-muted-foreground py-8">
+              <div className="animate-pulse">설문을 시작하는 중...</div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
