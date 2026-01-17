@@ -166,6 +166,8 @@ def init_database():
                 execution_time REAL NOT NULL,
                 tier1_time REAL NOT NULL,
                 tier2_time REAL NOT NULL,
+                report_data_json TEXT,
+                report_generation_time REAL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (workflow_id) REFERENCES workflows(id)
             )
@@ -608,6 +610,8 @@ def save_qie_result(
     execution_time: float,
     tier1_time: float,
     tier2_time: float,
+    report_data: Optional[dict] = None,
+    report_generation_time: float = 0.0,
 ):
     """Save QIE result to database."""
     with get_connection() as conn:
@@ -615,8 +619,9 @@ def save_qie_result(
             """
             INSERT OR REPLACE INTO qie_results (
                 job_id, workflow_id, tier1_results_json, aggregated_stats_json,
-                analysis_json, execution_time, tier1_time, tier2_time, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                analysis_json, execution_time, tier1_time, tier2_time,
+                report_data_json, report_generation_time, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 job_id,
@@ -627,6 +632,8 @@ def save_qie_result(
                 execution_time,
                 tier1_time,
                 tier2_time,
+                json.dumps(report_data) if report_data else None,
+                report_generation_time,
                 _datetime_to_str(datetime.now()),
             ),
         )
@@ -642,6 +649,7 @@ def load_qie_result(job_id: str) -> Optional[dict]:
         if not row:
             return None
 
+        report_data_json = row["report_data_json"] if "report_data_json" in row.keys() else None
         return {
             "job_id": row["job_id"],
             "workflow_id": row["workflow_id"],
@@ -651,6 +659,8 @@ def load_qie_result(job_id: str) -> Optional[dict]:
             "execution_time": row["execution_time"],
             "tier1_time": row["tier1_time"],
             "tier2_time": row["tier2_time"],
+            "report_data": json.loads(report_data_json) if report_data_json else None,
+            "report_generation_time": row["report_generation_time"] if "report_generation_time" in row.keys() else None,
             "created_at": _str_to_datetime(row["created_at"]),
         }
 
@@ -666,6 +676,7 @@ def load_qie_result_by_workflow(workflow_id: str) -> Optional[dict]:
         if not row:
             return None
 
+        report_data_json = row["report_data_json"] if "report_data_json" in row.keys() else None
         return {
             "job_id": row["job_id"],
             "workflow_id": row["workflow_id"],
@@ -675,6 +686,8 @@ def load_qie_result_by_workflow(workflow_id: str) -> Optional[dict]:
             "execution_time": row["execution_time"],
             "tier1_time": row["tier1_time"],
             "tier2_time": row["tier2_time"],
+            "report_data": json.loads(report_data_json) if report_data_json else None,
+            "report_generation_time": row["report_generation_time"] if "report_generation_time" in row.keys() else None,
             "created_at": _str_to_datetime(row["created_at"]),
         }
 

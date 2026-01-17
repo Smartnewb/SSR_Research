@@ -83,6 +83,8 @@ class QIEResultResponse(BaseModel):
     execution_time: float
     tier1_time: float
     tier2_time: float
+    report_data: Optional[dict] = None
+    report_generation_time: Optional[float] = None
 
 
 @router.post("/{workflow_id}/qie/start", response_model=QIEJobResponse)
@@ -188,7 +190,7 @@ async def start_qie_analysis(
     # Get product description
     product_desc = ""
     if workflow.product:
-        product_desc = workflow.product.full_description or workflow.product.name or ""
+        product_desc = workflow.product.description or workflow.product.name or ""
 
     # Start background task
     background_tasks.add_task(
@@ -226,6 +228,7 @@ async def run_qie_analysis_task(
             "tier1_processing": QIEJobStatus.TIER1_PROCESSING.value,
             "aggregating": QIEJobStatus.AGGREGATING.value,
             "tier2_synthesis": QIEJobStatus.TIER2_SYNTHESIS.value,
+            "report_generation": QIEJobStatus.TIER2_SYNTHESIS.value,  # Use same status for report gen
             "completed": QIEJobStatus.COMPLETED.value,
         }
 
@@ -255,7 +258,7 @@ async def run_qie_analysis_task(
     try:
         # Run pipeline
         pipeline = QIEPipeline(progress_callback=progress_callback)
-        tier1_results, aggregated_stats, analysis, timing = await pipeline.run_full_analysis(
+        tier1_results, aggregated_stats, analysis, timing, report_data = await pipeline.run_full_analysis(
             responses=responses,
             product_description=product_description,
         )
@@ -275,6 +278,8 @@ async def run_qie_analysis_task(
             execution_time=timing["total_time"],
             tier1_time=timing["tier1_time"],
             tier2_time=timing["tier2_time"],
+            report_data=report_data,
+            report_generation_time=timing.get("report_time", 0.0),
         )
 
         # Update final job status (preserves started_at)
@@ -376,6 +381,8 @@ async def get_qie_result(workflow_id: str):
         execution_time=result["execution_time"],
         tier1_time=result["tier1_time"],
         tier2_time=result["tier2_time"],
+        report_data=result.get("report_data"),
+        report_generation_time=result.get("report_generation_time"),
     )
 
 
