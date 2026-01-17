@@ -219,3 +219,27 @@ class QIEResult:
     tier1_time: float = 0.0
     tier2_time: float = 0.0
     created_at: Optional[datetime] = None
+
+
+@dataclass
+class NarrativeReport:
+    """Narrative insight report data."""
+
+    concept_id: str
+    concept_name: str
+    generated_at: str
+    total_respondents: int
+    executive_summary: dict
+    demographics: dict
+    customer_needs: dict
+    drivers_barriers: dict
+    segments: list[dict]
+    action_items: list[dict]
+
+
+@dataclass
+class QIEResultWithReport(QIEResult):
+    """QIE result including narrative report."""
+
+    narrative_report: Optional[NarrativeReport] = None
+    report_generation_time: float = 0.0
