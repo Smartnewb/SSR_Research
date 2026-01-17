@@ -37,7 +37,28 @@ export default function CorePersonaPage() {
   const [researchReport, setResearchReport] = useState("");
   const [parsingReport, setParsingReport] = useState(false);
   const [parsingProgress, setParsingProgress] = useState(0);
-  const [showResearchModal, setShowResearchModal] = useState(false);
+  const [generatingPrompt, setGeneratingPrompt] = useState(false);
+
+  // Multi-Archetype states
+  interface Archetype {
+    segment_id: string;
+    segment_name: string;
+    share_ratio: number;
+    demographics: {
+      age_range: [number, number];
+      gender_distribution: { female: number; male: number };
+    };
+    income_level: string;
+    category_usage: string;
+    shopping_behavior: string;
+    core_traits: string[];
+    pain_points: string[];
+    decision_drivers: string[];
+  }
+  const [archetypes, setArchetypes] = useState<Archetype[]>([]);
+  const [selectedArchetypeIds, setSelectedArchetypeIds] = useState<string[]>([]);
+  const [showArchetypeSelection, setShowArchetypeSelection] = useState(false);
+  const [savingArchetypes, setSavingArchetypes] = useState(false);
 
   useEffect(() => {
     loadWorkflowData();
@@ -65,14 +86,29 @@ export default function CorePersonaPage() {
             return dist;
           };
 
+          // Ensure income_brackets has all 4 keys after conversion
+          const rawIncomeBrackets = convertToPercentage(
+            personaData.income_brackets || { none: 0.1, low: 0.25, mid: 0.45, high: 0.2 }
+          );
+          const incomeBracketsWithNone = {
+            none: rawIncomeBrackets.none ?? 0,
+            low: rawIncomeBrackets.low ?? 0,
+            mid: rawIncomeBrackets.mid ?? 0,
+            high: rawIncomeBrackets.high ?? 0,
+          };
+
+          const rawGender = convertToPercentage(
+            personaData.gender_distribution || { female: 0.5, male: 0.5 }
+          );
+          const genderWithDefaults = {
+            female: rawGender.female ?? 50,
+            male: rawGender.male ?? 50,
+          };
+
           setFormData({
             age_range: personaData.age_range || [25, 45],
-            gender_distribution: convertToPercentage(
-              personaData.gender_distribution || { female: 0.5, male: 0.5 }
-            ),
-            income_brackets: convertToPercentage(
-              personaData.income_brackets || { none: 0.1, low: 0.25, mid: 0.45, high: 0.2 }
-            ),
+            gender_distribution: genderWithDefaults,
+            income_brackets: incomeBracketsWithNone,
             location: personaData.location || "urban",
             category_usage: personaData.category_usage || "medium",
             shopping_behavior:
@@ -128,6 +164,7 @@ export default function CorePersonaPage() {
   };
 
   const handleGenerateResearchPrompt = async () => {
+    setGeneratingPrompt(true);
     try {
       const workflowResponse = await fetch(
         `http://localhost:8000/api/workflows/${workflowId}`
@@ -136,6 +173,7 @@ export default function CorePersonaPage() {
 
       if (!workflow.product) {
         alert("제품 설명을 먼저 입력해주세요");
+        setGeneratingPrompt(false);
         return;
       }
 
@@ -166,10 +204,10 @@ export default function CorePersonaPage() {
             male: formData.gender_distribution.male / 100,
           },
           income_brackets: {
-            none: formData.income_brackets.none / 100,
-            low: formData.income_brackets.low / 100,
-            mid: formData.income_brackets.mid / 100,
-            high: formData.income_brackets.high / 100,
+            none: (formData.income_brackets.none ?? 0) / 100,
+            low: (formData.income_brackets.low ?? 0) / 100,
+            mid: (formData.income_brackets.mid ?? 0) / 100,
+            high: (formData.income_brackets.high ?? 0) / 100,
           },
           location: formData.location,
           category_usage: formData.category_usage,
@@ -180,7 +218,7 @@ export default function CorePersonaPage() {
       }
 
       const response = await fetch(
-        "http://localhost:8000/api/research/generate-prompt?use_mock=true",
+        "http://localhost:8000/api/research/generate-prompt?use_mock=false",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -199,26 +237,39 @@ export default function CorePersonaPage() {
     } catch (error) {
       console.error("Error generating research prompt:", error);
       alert("연구 프롬프트 생성에 실패했습니다.");
+    } finally {
+      setGeneratingPrompt(false);
     }
   };
 
   const handleParseResearchReport = async () => {
     if (!researchReport.trim()) {
-      alert("Please paste your research report");
+      alert("리서치 보고서를 붙여넣어 주세요");
       return;
     }
 
     setParsingReport(true);
     setParsingProgress(10);
     try {
+      // Get workflow for product context
+      const workflowResponse = await fetch(
+        `http://localhost:8000/api/workflows/${workflowId}`
+      );
+      const workflow = await workflowResponse.json();
+      const productCategory = workflow.product?.category || "";
+
       setParsingProgress(30);
+
+      // Call /api/archetypes/segment to get 3-5 target groups
       const response = await fetch(
-        "http://localhost:8000/api/research/parse-report?use_mock=false",
+        "http://localhost:8000/api/archetypes/segment",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             research_report: researchReport,
+            product_category: productCategory,
+            target_segments: 4,
           }),
         }
       );
@@ -226,63 +277,75 @@ export default function CorePersonaPage() {
       setParsingProgress(70);
 
       if (!response.ok) {
-        throw new Error("Failed to parse research report");
+        throw new Error("Failed to segment market from research report");
       }
 
       const data = await response.json();
       setParsingProgress(90);
 
-      // Normalize gender_distribution to ensure sum is exactly 100
-      const normalizePercentages = (obj: Record<string, number>) => {
-        const entries = Object.entries(obj).map(([k, v]) => [k, (v as number) * 100]);
-        const sum = entries.reduce((acc, [_, v]) => acc + (v as number), 0);
-
-        if (sum === 0) return Object.fromEntries(entries);
-
-        // Normalize to 100%
-        const normalized = entries.map(([k, v]) => [k, ((v as number) / sum) * 100]);
-
-        // Round and adjust the largest value to ensure exact 100
-        const rounded = normalized.map(([k, v]) => [k, Math.round(v as number)]);
-        const roundedSum = rounded.reduce((acc, [_, v]) => acc + (v as number), 0);
-
-        if (roundedSum !== 100 && rounded.length > 0) {
-          // Find the largest value and adjust it
-          const maxIndex = rounded.reduce(
-            (maxIdx, [_, v], idx, arr) =>
-              (v as number) > (arr[maxIdx][1] as number) ? idx : maxIdx,
-            0
-          );
-          rounded[maxIndex][1] = (rounded[maxIndex][1] as number) + (100 - roundedSum);
-        }
-
-        return Object.fromEntries(rounded);
-      };
-
-      setFormData((prev) => ({
-        age_range: data.refined_demographics.age_range,
-        gender_distribution: normalizePercentages(data.refined_demographics.gender_distribution),
-        income_brackets: normalizePercentages(data.refined_demographics.income_brackets),
-        location: data.refined_demographics.location,
-        category_usage: data.behavioral_insights.category_usage,
-        shopping_behavior: data.behavioral_insights.shopping_behavior,
-        key_pain_points: data.psychographics.key_pain_points,
-        decision_drivers: data.psychographics.decision_drivers,
-        currency: prev.currency,
-      }));
-
+      // Store archetypes and show selection UI
+      setArchetypes(data.archetypes || []);
+      setSelectedArchetypeIds([]);
+      setShowArchetypeSelection(true);
       setParsingProgress(100);
-      setShowResearchModal(false);
-      alert(
-        `Research insights applied! Confidence: ${data.confidence_score * 100}%`
-      );
+
+      if (data.warnings && data.warnings.length > 0) {
+        console.warn("Segmentation warnings:", data.warnings);
+      }
     } catch (error) {
       console.error("Error parsing report:", error);
-      alert("Failed to parse research report");
+      alert("리서치 보고서 분석에 실패했습니다. 다시 시도해주세요.");
     } finally {
       setParsingReport(false);
       setParsingProgress(0);
     }
+  };
+
+  // Save selected archetypes to backend and navigate to confirm page
+  const handleApplyArchetypes = async () => {
+    if (selectedArchetypeIds.length === 0) {
+      alert("최소 1개의 타겟 그룹을 선택해주세요");
+      return;
+    }
+
+    const selected = archetypes.filter((a) =>
+      selectedArchetypeIds.includes(a.segment_id)
+    );
+
+    setSavingArchetypes(true);
+    try {
+      // Save selected archetypes to backend (Multi-Archetype mode)
+      const response = await fetch(
+        `http://localhost:8000/api/workflows/${workflowId}/archetypes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            archetypes: selected,
+            currency: formData.currency,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to save archetypes");
+      }
+
+      // Navigate directly to confirm page
+      router.push(`/workflows/${workflowId}/confirm`);
+    } catch (error) {
+      console.error("Error saving archetypes:", error);
+      alert(error instanceof Error ? error.message : "아키타입 저장에 실패했습니다.");
+    } finally {
+      setSavingArchetypes(false);
+    }
+  };
+
+  const toggleArchetypeSelection = (id: string) => {
+    setSelectedArchetypeIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   const handleSubmit = async () => {
@@ -296,10 +359,10 @@ export default function CorePersonaPage() {
           male: formData.gender_distribution.male / 100,
         },
         income_brackets: {
-          none: formData.income_brackets.none / 100,
-          low: formData.income_brackets.low / 100,
-          mid: formData.income_brackets.mid / 100,
-          high: formData.income_brackets.high / 100,
+          none: (formData.income_brackets.none ?? 0) / 100,
+          low: (formData.income_brackets.low ?? 0) / 100,
+          mid: (formData.income_brackets.mid ?? 0) / 100,
+          high: (formData.income_brackets.high ?? 0) / 100,
         },
         currency: formData.currency,
       };
@@ -364,92 +427,221 @@ export default function CorePersonaPage() {
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!researchPrompt ? (
-            <div className="text-center py-6">
-              <Button
-                onClick={handleGenerateResearchPrompt}
-                size="lg"
-                className="px-8"
-              >
-                1️⃣ 시장조사 프롬프트 생성하기
-              </Button>
-              <p className="text-xs text-muted-foreground mt-2">
-                제품 정보를 바탕으로 시장조사 프롬프트를 만듭니다 (무료 - API 비용 없음)
-              </p>
-            </div>
-          ) : (
-            <Tabs defaultValue="prompt" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="prompt">2️⃣ 프롬프트 복사</TabsTrigger>
-                <TabsTrigger value="report">3️⃣ 결과 붙여넣기</TabsTrigger>
-              </TabsList>
+          <Tabs defaultValue="report" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="prompt">1️⃣ 프롬프트 생성/복사</TabsTrigger>
+              <TabsTrigger value="report">2️⃣ 결과 붙여넣기</TabsTrigger>
+            </TabsList>
 
-              <TabsContent value="prompt" className="space-y-3 mt-4">
-                <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
-                  <p className="font-semibold text-amber-900">다음 단계:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-amber-800 mt-1">
-                    <li>아래 프롬프트를 복사하세요</li>
-                    <li>Gemini Deep Research (gemini.google.com)에 접속하세요</li>
-                    <li>프롬프트를 붙여넣고 실행하세요</li>
-                    <li>결과가 나오면 "3️⃣ 결과 붙여넣기" 탭으로 이동하세요</li>
-                  </ol>
-                </div>
-                <Textarea
-                  value={researchPrompt}
-                  readOnly
-                  rows={12}
-                  className="font-mono text-sm"
-                />
-                <Button
-                  onClick={() => {
-                    navigator.clipboard.writeText(researchPrompt);
-                    alert("✓ 프롬프트가 클립보드에 복사되었습니다!");
-                  }}
-                  className="w-full"
-                  size="lg"
-                >
-                  📋 프롬프트 복사하기
-                </Button>
-              </TabsContent>
-
-              <TabsContent value="report" className="space-y-3 mt-4">
-                <div className="bg-green-50 border border-green-200 rounded p-3 text-sm">
-                  <p className="font-semibold text-green-900">
-                    Gemini 리서치 결과를 아래에 붙여넣으세요
-                  </p>
-                  <p className="text-green-800 mt-1">
-                    AI가 자동으로 분석하여 아래의 7개 페르소나 필드를 채워드립니다!
+            <TabsContent value="prompt" className="space-y-3 mt-4">
+              {!researchPrompt ? (
+                <div className="text-center py-6">
+                  <Button
+                    onClick={handleGenerateResearchPrompt}
+                    disabled={generatingPrompt}
+                    size="lg"
+                    className="px-8"
+                  >
+                    {generatingPrompt ? (
+                      <>
+                        <span className="inline-block animate-spin mr-2">⏳</span>
+                        프롬프트 생성 중...
+                      </>
+                    ) : (
+                      "🔮 시장조사 프롬프트 생성하기"
+                    )}
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    제품 정보를 바탕으로 시장조사 프롬프트를 만듭니다 (무료 - API 비용 없음)
                   </p>
                 </div>
-                <Textarea
-                  value={researchReport}
-                  onChange={(e) => setResearchReport(e.target.value)}
-                  placeholder="Gemini Deep Research 결과를 여기에 붙여넣으세요..."
-                  rows={12}
-                  className="text-sm"
-                />
-                {parsingReport && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">분석 진행률</span>
-                      <span className="font-semibold">{parsingProgress}%</span>
-                    </div>
-                    <Progress value={parsingProgress} />
+              ) : (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+                    <p className="font-semibold text-amber-900">다음 단계:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-amber-800 mt-1">
+                      <li>아래 프롬프트를 복사하세요</li>
+                      <li>Gemini Deep Research (gemini.google.com)에 접속하세요</li>
+                      <li>프롬프트를 붙여넣고 실행하세요</li>
+                      <li>결과가 나오면 "2️⃣ 결과 붙여넣기" 탭으로 이동하세요</li>
+                    </ol>
                   </div>
+                  <Textarea
+                    value={researchPrompt}
+                    readOnly
+                    rows={12}
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    onClick={() => {
+                      navigator.clipboard.writeText(researchPrompt);
+                      alert("✓ 프롬프트가 클립보드에 복사되었습니다!");
+                    }}
+                    className="w-full"
+                    size="lg"
+                  >
+                    📋 프롬프트 복사하기
+                  </Button>
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="report" className="space-y-3 mt-4">
+                {!showArchetypeSelection ? (
+                  <>
+                    <div className="bg-green-50 border border-green-200 rounded p-3 text-sm">
+                      <p className="font-semibold text-green-900">
+                        Gemini 리서치 결과를 아래에 붙여넣으세요
+                      </p>
+                      <p className="text-green-800 mt-1">
+                        AI가 3~5개의 타겟 고객 그룹을 추출합니다. 원하는 그룹을 선택하세요!
+                      </p>
+                    </div>
+                    <Textarea
+                      value={researchReport}
+                      onChange={(e) => setResearchReport(e.target.value)}
+                      placeholder="Gemini Deep Research 결과를 여기에 붙여넣으세요..."
+                      rows={12}
+                      className="text-sm"
+                    />
+                    {parsingReport && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">분석 진행률</span>
+                          <span className="font-semibold">{parsingProgress}%</span>
+                        </div>
+                        <Progress value={parsingProgress} />
+                      </div>
+                    )}
+                    <Button
+                      onClick={handleParseResearchReport}
+                      disabled={parsingReport || !researchReport.trim()}
+                      className="w-full"
+                      size="lg"
+                    >
+                      {parsingReport
+                        ? `분석 중... (${parsingProgress}%)`
+                        : "✨ 리서치 결과 분석하고 타겟 그룹 추출"}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-purple-50 border border-purple-200 rounded p-3 text-sm">
+                      <p className="font-semibold text-purple-900">
+                        🎯 {archetypes.length}개의 타겟 고객 그룹이 발견되었습니다!
+                      </p>
+                      <p className="text-purple-800 mt-1">
+                        타겟으로 삼을 그룹을 선택하세요. 여러 개 선택 시 가중 평균이 적용됩니다.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {archetypes.map((arch) => (
+                        <div
+                          key={arch.segment_id}
+                          onClick={() => toggleArchetypeSelection(arch.segment_id)}
+                          className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                            selectedArchetypeIds.includes(arch.segment_id)
+                              ? "border-purple-500 bg-purple-50"
+                              : "border-gray-200 hover:border-purple-300"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg font-semibold">
+                                  {arch.segment_name}
+                                </span>
+                                <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 rounded-full">
+                                  점유율 {Math.round(arch.share_ratio * 100)}%
+                                </span>
+                              </div>
+                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
+                                <div>
+                                  <span className="font-medium">연령:</span>{" "}
+                                  {arch.demographics.age_range[0]}~{arch.demographics.age_range[1]}세
+                                </div>
+                                <div>
+                                  <span className="font-medium">성별:</span>{" "}
+                                  여 {arch.demographics.gender_distribution.female}% / 남{" "}
+                                  {arch.demographics.gender_distribution.male}%
+                                </div>
+                                <div>
+                                  <span className="font-medium">소득:</span>{" "}
+                                  {arch.income_level === "high"
+                                    ? "고소득"
+                                    : arch.income_level === "mid"
+                                    ? "중소득"
+                                    : arch.income_level === "low"
+                                    ? "저소득"
+                                    : "무소득/학생"}
+                                </div>
+                                <div>
+                                  <span className="font-medium">사용빈도:</span>{" "}
+                                  {arch.category_usage === "high"
+                                    ? "높음"
+                                    : arch.category_usage === "medium"
+                                    ? "보통"
+                                    : "낮음"}
+                                </div>
+                              </div>
+                              {arch.core_traits && arch.core_traits.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {arch.core_traits.slice(0, 4).map((trait, i) => (
+                                    <span
+                                      key={i}
+                                      className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded"
+                                    >
+                                      {trait}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div
+                              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                                selectedArchetypeIds.includes(arch.segment_id)
+                                  ? "border-purple-500 bg-purple-500"
+                                  : "border-gray-300"
+                              }`}
+                            >
+                              {selectedArchetypeIds.includes(arch.segment_id) && (
+                                <span className="text-white text-sm">✓</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        onClick={() => {
+                          setShowArchetypeSelection(false);
+                          setArchetypes([]);
+                        }}
+                        variant="outline"
+                        className="flex-1"
+                        disabled={savingArchetypes}
+                      >
+                        ← 다시 분석
+                      </Button>
+                      <Button
+                        onClick={handleApplyArchetypes}
+                        disabled={selectedArchetypeIds.length === 0 || savingArchetypes}
+                        className="flex-1"
+                      >
+                        {savingArchetypes
+                          ? "저장 중..."
+                          : selectedArchetypeIds.length === 0
+                          ? "그룹을 선택하세요"
+                          : `${selectedArchetypeIds.length}개 그룹으로 진행 →`}
+                      </Button>
+                    </div>
+                  </>
                 )}
-                <Button
-                  onClick={handleParseResearchReport}
-                  disabled={parsingReport || !researchReport.trim()}
-                  className="w-full"
-                  size="lg"
-                >
-                  {parsingReport
-                    ? `분석 중... (${parsingProgress}%)`
-                    : "✨ 리서치 결과 분석하고 페르소나 자동 완성"}
-                </Button>
               </TabsContent>
             </Tabs>
-          )}
 
           {researchPrompt && (
             <div className="pt-2 border-t">
@@ -471,11 +663,13 @@ export default function CorePersonaPage() {
         </CardContent>
       </Card>
 
+      {/* 아키타입 선택 화면이 표시되면 수동 입력 폼 숨김 */}
+      {!showArchetypeSelection && (
       <Card>
         <CardHeader>
-          <CardTitle>타겟 고객 페르소나 작성 (7개 필수 항목)</CardTitle>
+          <CardTitle>또는: 수동으로 페르소나 작성 (7개 필수 항목)</CardTitle>
           <p className="text-sm text-muted-foreground pt-2">
-            아래 항목을 직접 입력하거나, 위의 시장조사 결과를 통해 자동으로 채울 수 있습니다.
+            시장조사 결과 없이 직접 타겟 고객을 정의하려면 아래 항목을 입력하세요.
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -647,14 +841,14 @@ export default function CorePersonaPage() {
                   {formData.currency === "KRW" ? "무소득/학생" : "Minimal"}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {formData.currency === "KRW" ? "0~30만원" : "$0-$500"}
+                  {formData.currency === "KRW" ? "0~50만원" : "$0-$500"}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
                     min="0"
                     max="100"
-                    value={formData.income_brackets.none}
+                    value={formData.income_brackets.none ?? 0}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
@@ -675,20 +869,20 @@ export default function CorePersonaPage() {
                   {formData.currency === "KRW" ? "저소득" : "Low"}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {formData.currency === "KRW" ? "30~70만원" : "$500-$2,000"}
+                  {formData.currency === "KRW" ? "50~150만원" : "$500-$2,000"}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
                     min="0"
                     max="100"
-                    value={formData.income_brackets.low}
+                    value={formData.income_brackets.low ?? 0}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          low: Number.parseInt(e.target.value) || 0,
+                          low: parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -703,20 +897,20 @@ export default function CorePersonaPage() {
                   {formData.currency === "KRW" ? "중소득" : "Middle"}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {formData.currency === "KRW" ? "70~120만원" : "$2,000-$5,000"}
+                  {formData.currency === "KRW" ? "150~300만원" : "$2,000-$5,000"}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
                     min="0"
                     max="100"
-                    value={formData.income_brackets.mid}
+                    value={formData.income_brackets.mid ?? 0}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          mid: Number.parseInt(e.target.value) || 0,
+                          mid: parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -731,20 +925,20 @@ export default function CorePersonaPage() {
                   {formData.currency === "KRW" ? "고소득" : "High"}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {formData.currency === "KRW" ? "120~200만원" : "$5,000-$10,000"}
+                  {formData.currency === "KRW" ? "300만원 이상" : "$5,000+"}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="number"
                     min="0"
                     max="100"
-                    value={formData.income_brackets.high}
+                    value={formData.income_brackets.high ?? 0}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
                         income_brackets: {
                           ...formData.income_brackets,
-                          high: Number.parseInt(e.target.value) || 0,
+                          high: parseInt(e.target.value) || 0,
                         },
                       })
                     }
@@ -757,9 +951,9 @@ export default function CorePersonaPage() {
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                현재 합계: {formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high}%
+                현재 합계: {(formData.income_brackets.none ?? 0) + (formData.income_brackets.low ?? 0) + (formData.income_brackets.mid ?? 0) + (formData.income_brackets.high ?? 0)}%
               </span>
-              {formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100 && (
+              {(formData.income_brackets.none ?? 0) + (formData.income_brackets.low ?? 0) + (formData.income_brackets.mid ?? 0) + (formData.income_brackets.high ?? 0) !== 100 && (
                 <span className="text-destructive font-medium">⚠ 합계가 100%가 되어야 합니다</span>
               )}
             </div>
@@ -881,7 +1075,7 @@ export default function CorePersonaPage() {
               formData.key_pain_points.length === 0 ||
               formData.decision_drivers.length === 0 ||
               formData.gender_distribution.female + formData.gender_distribution.male !== 100 ||
-              formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100
+              (formData.income_brackets.none ?? 0) + (formData.income_brackets.low ?? 0) + (formData.income_brackets.mid ?? 0) + (formData.income_brackets.high ?? 0) !== 100
             }
             className="w-full"
             size="lg"
@@ -889,13 +1083,14 @@ export default function CorePersonaPage() {
             {loading ? "저장 중..." : "✓ 페르소나 확정하고 다음 단계로"}
           </Button>
           {(formData.gender_distribution.female + formData.gender_distribution.male !== 100 ||
-            formData.income_brackets.none + formData.income_brackets.low + formData.income_brackets.mid + formData.income_brackets.high !== 100) && (
+            (formData.income_brackets.none ?? 0) + (formData.income_brackets.low ?? 0) + (formData.income_brackets.mid ?? 0) + (formData.income_brackets.high ?? 0) !== 100) && (
             <p className="text-sm text-destructive text-center">
               ⚠ 성별 분포와 소득 분포의 합계가 각각 100%가 되어야 합니다
             </p>
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

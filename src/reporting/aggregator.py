@@ -1,5 +1,7 @@
 """Results aggregation and statistical analysis."""
 
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -334,5 +336,253 @@ def format_summary_text(aggregated: AggregatedResults) -> str:
         for label, count in sorted(aggregated.score_distribution.items()):
             bar = "#" * count
             lines.append(f"  {label}: {bar} ({count})")
+
+    return "\n".join(lines)
+
+
+STOP_WORDS = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your",
+    "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she",
+    "her", "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an",
+    "the", "and", "but", "if", "or", "because", "as", "until", "while", "of",
+    "at", "by", "for", "with", "about", "against", "between", "into", "through",
+    "during", "before", "after", "above", "below", "to", "from", "up", "down",
+    "in", "out", "on", "off", "over", "under", "again", "further", "then",
+    "once", "here", "there", "when", "where", "why", "how", "all", "each",
+    "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
+    "own", "same", "so", "than", "too", "very", "s", "t", "can", "will", "just",
+    "don", "should", "now", "would", "could", "might", "must", "shall", "may",
+    "product", "buy", "purchase", "would", "think", "like", "really", "also",
+}
+
+
+@dataclass
+class KeywordInsight:
+    """Keyword analysis insight for qualitative data."""
+
+    keyword: str
+    frequency: int
+    tf_idf_score: float
+    sentiment_context: str  # "positive", "negative", "neutral"
+    avg_score_when_present: float
+
+
+@dataclass
+class QualitativeInsights:
+    """Qualitative analysis results from response texts."""
+
+    top_keywords: list[KeywordInsight]
+    positive_keywords: list[KeywordInsight]
+    negative_keywords: list[KeywordInsight]
+    total_responses: int
+    avg_response_length: float
+    insight_summary: str
+
+
+def extract_keywords(
+    texts: list[str],
+    top_n: int = 20,
+    min_word_length: int = 3,
+) -> list[tuple[str, int]]:
+    """
+    Extract keywords from texts using frequency analysis.
+
+    Args:
+        texts: List of response texts
+        top_n: Number of top keywords to return
+        min_word_length: Minimum word length to consider
+
+    Returns:
+        List of (keyword, frequency) tuples
+    """
+    word_counts: Counter = Counter()
+
+    for text in texts:
+        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+        filtered = [
+            w for w in words
+            if len(w) >= min_word_length and w not in STOP_WORDS
+        ]
+        word_counts.update(filtered)
+
+    return word_counts.most_common(top_n)
+
+
+def calculate_tf_idf(
+    texts: list[str],
+    top_n: int = 20,
+    min_word_length: int = 3,
+) -> list[tuple[str, float]]:
+    """
+    Calculate TF-IDF scores for keywords.
+
+    Args:
+        texts: List of response texts
+        top_n: Number of top keywords to return
+        min_word_length: Minimum word length to consider
+
+    Returns:
+        List of (keyword, tf_idf_score) tuples
+    """
+    if not texts:
+        return []
+
+    doc_freq: Counter = Counter()
+    term_freq: Counter = Counter()
+
+    for text in texts:
+        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+        filtered = [
+            w for w in words
+            if len(w) >= min_word_length and w not in STOP_WORDS
+        ]
+        term_freq.update(filtered)
+        doc_freq.update(set(filtered))
+
+    n_docs = len(texts)
+    tf_idf_scores = {}
+
+    for word, tf in term_freq.items():
+        df = doc_freq[word]
+        idf = np.log(n_docs / (df + 1)) + 1
+        tf_idf_scores[word] = tf * idf
+
+    sorted_scores = sorted(tf_idf_scores.items(), key=lambda x: x[1], reverse=True)
+    return sorted_scores[:top_n]
+
+
+def analyze_qualitative_data(
+    results: list[SurveyResult],
+    score_threshold_positive: float = 0.6,
+    score_threshold_negative: float = 0.4,
+    top_n: int = 10,
+) -> QualitativeInsights:
+    """
+    Analyze qualitative data from survey responses.
+
+    Extracts keywords and provides insights based on response texts,
+    correlating with SSR scores.
+
+    Args:
+        results: List of survey results with response texts
+        score_threshold_positive: Score above this is considered positive
+        score_threshold_negative: Score below this is considered negative
+        top_n: Number of top keywords per category
+
+    Returns:
+        QualitativeInsights with keyword analysis
+    """
+    if not results:
+        return QualitativeInsights(
+            top_keywords=[],
+            positive_keywords=[],
+            negative_keywords=[],
+            total_responses=0,
+            avg_response_length=0.0,
+            insight_summary="No responses to analyze.",
+        )
+
+    all_texts = [r.response_text for r in results]
+    positive_texts = [r.response_text for r in results if r.ssr_score >= score_threshold_positive]
+    negative_texts = [r.response_text for r in results if r.ssr_score <= score_threshold_negative]
+
+    tf_idf_all = calculate_tf_idf(all_texts, top_n)
+    tf_idf_positive = calculate_tf_idf(positive_texts, top_n)
+    tf_idf_negative = calculate_tf_idf(negative_texts, top_n)
+
+    def build_insights(
+        tf_idf_list: list[tuple[str, float]],
+        results: list[SurveyResult],
+        sentiment: str,
+    ) -> list[KeywordInsight]:
+        insights = []
+        for keyword, score in tf_idf_list:
+            matching = [
+                r for r in results
+                if keyword in r.response_text.lower()
+            ]
+            frequency = len(matching)
+            avg_score = (
+                sum(r.ssr_score for r in matching) / frequency
+                if frequency > 0 else 0.0
+            )
+            insights.append(KeywordInsight(
+                keyword=keyword,
+                frequency=frequency,
+                tf_idf_score=score,
+                sentiment_context=sentiment,
+                avg_score_when_present=avg_score,
+            ))
+        return insights
+
+    top_keywords = build_insights(tf_idf_all, results, "neutral")
+    positive_keywords = build_insights(tf_idf_positive, results, "positive")
+    negative_keywords = build_insights(tf_idf_negative, results, "negative")
+
+    avg_length = sum(len(t.split()) for t in all_texts) / len(all_texts) if all_texts else 0
+
+    pos_key_str = ", ".join(k.keyword for k in positive_keywords[:3]) if positive_keywords else "none"
+    neg_key_str = ", ".join(k.keyword for k in negative_keywords[:3]) if negative_keywords else "none"
+    avg_score = sum(r.ssr_score for r in results) / len(results)
+
+    insight_summary = (
+        f"Analysis of {len(results)} responses (avg score: {avg_score:.2f}). "
+        f"Positive responses frequently mention: {pos_key_str}. "
+        f"Negative responses frequently mention: {neg_key_str}."
+    )
+
+    return QualitativeInsights(
+        top_keywords=top_keywords,
+        positive_keywords=positive_keywords,
+        negative_keywords=negative_keywords,
+        total_responses=len(results),
+        avg_response_length=avg_length,
+        insight_summary=insight_summary,
+    )
+
+
+def format_qualitative_insights(insights: QualitativeInsights) -> str:
+    """
+    Format qualitative insights as human-readable text.
+
+    Args:
+        insights: Qualitative analysis results
+
+    Returns:
+        Formatted text summary
+    """
+    lines = [
+        "Qualitative Analysis",
+        "=" * 50,
+        "",
+        f"Total Responses: {insights.total_responses}",
+        f"Avg Response Length: {insights.avg_response_length:.1f} words",
+        "",
+        insights.insight_summary,
+        "",
+        "-" * 50,
+        "Top Keywords (Overall):",
+    ]
+
+    for kw in insights.top_keywords[:5]:
+        lines.append(
+            f"  {kw.keyword}: freq={kw.frequency}, "
+            f"avg_score={kw.avg_score_when_present:.2f}"
+        )
+
+    if insights.positive_keywords:
+        lines.append("")
+        lines.append("Keywords in Positive Responses (score >= 0.6):")
+        for kw in insights.positive_keywords[:5]:
+            lines.append(f"  {kw.keyword}: freq={kw.frequency}")
+
+    if insights.negative_keywords:
+        lines.append("")
+        lines.append("Keywords in Negative Responses (score <= 0.4):")
+        for kw in insights.negative_keywords[:5]:
+            lines.append(f"  {kw.keyword}: freq={kw.frequency}")
 
     return "\n".join(lines)

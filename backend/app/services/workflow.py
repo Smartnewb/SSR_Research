@@ -9,6 +9,7 @@ from ..models.workflow import (
     WorkflowStatus,
     ProductDescription,
     CorePersona,
+    ArchetypeSegment,
 )
 from ..models.comparison import ConceptInput
 from . import database as db
@@ -129,10 +130,58 @@ class WorkflowService:
         self._save_to_database(workflow)
         return workflow
 
+    def update_archetypes(
+        self, workflow_id: str, archetypes: list[ArchetypeSegment], currency: str = "KRW"
+    ) -> SurveyWorkflow:
+        """Update archetypes for Multi-Archetype mode (Step 2 alternative).
+
+        Instead of using a single core_persona, store multiple archetypes
+        with their share_ratio for stratified sampling.
+        """
+        workflow = self.get_workflow(workflow_id)
+        if not workflow:
+            raise ValueError(f"Workflow {workflow_id} not found")
+
+        allowed_statuses = [
+            WorkflowStatus.PERSONA_BUILDING,
+            WorkflowStatus.PERSONA_CONFIRMING,
+            WorkflowStatus.SAMPLE_SIZE_SELECTION,
+            WorkflowStatus.GENERATING_PERSONAS,
+        ]
+        if workflow.status not in allowed_statuses:
+            raise ValueError(
+                f"Cannot update archetypes in status {workflow.status}. Survey already started."
+            )
+
+        if not archetypes or len(archetypes) < 1:
+            raise ValueError("At least 1 archetype is required")
+        if len(archetypes) > 5:
+            raise ValueError("Maximum 5 archetypes allowed")
+
+        # Normalize share_ratio to sum to 1.0
+        total_share = sum(arch.share_ratio for arch in archetypes)
+        if total_share > 0:
+            for arch in archetypes:
+                arch.share_ratio = arch.share_ratio / total_share
+
+        workflow.archetypes = archetypes
+        workflow.use_multi_archetype = True
+        workflow.currency = currency
+        workflow.core_persona = None  # Clear single persona mode
+        workflow.status = WorkflowStatus.PERSONA_CONFIRMING
+        workflow.current_step = 3
+        workflow.persona_generation_job_id = None
+        workflow.updated_at = datetime.now(timezone.utc)
+
+        self._workflows[workflow_id] = workflow
+        self._save_to_database(workflow)
+        return workflow
+
     def confirm_persona(self, workflow_id: str) -> SurveyWorkflow:
-        """Confirm core persona (Step 3).
+        """Confirm core persona or archetypes (Step 3).
 
         Allows re-confirming when going back from later steps.
+        Works for both single persona mode and multi-archetype mode.
         """
         workflow = self.get_workflow(workflow_id)
         if not workflow:
@@ -147,6 +196,12 @@ class WorkflowService:
         if workflow.status not in allowed_statuses:
             raise ValueError(
                 f"Cannot confirm persona in status {workflow.status}. Survey already started."
+            )
+
+        # Validate: either core_persona or archetypes must be set
+        if not workflow.core_persona and not workflow.archetypes:
+            raise ValueError(
+                "No persona or archetypes defined. Complete Step 2 first."
             )
 
         workflow.status = WorkflowStatus.SAMPLE_SIZE_SELECTION

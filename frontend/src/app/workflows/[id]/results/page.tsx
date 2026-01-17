@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Download, Home, Trophy, BarChart3, FlaskConical, Users } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Download, Home, Trophy, BarChart3, FlaskConical, Users, RotateCcw, ArrowLeft, Brain } from "lucide-react";
 import { toast } from "sonner";
+import { QIEDashboard } from "@/components/qie";
 
 interface ConceptScore {
   concept_id: string;
@@ -113,6 +115,31 @@ export default function ResultsPage() {
     toast.success("JSON 파일 다운로드 완료!");
   };
 
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleRetrySurvey = async () => {
+    if (isRetrying) return;
+
+    setIsRetrying(true);
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/workflows/${workflowId}/execute/start?use_mock=false&force=true`,
+        { method: "POST" }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to restart survey");
+      }
+
+      toast.success("설문을 다시 시작합니다...");
+      router.push(`/workflows/${workflowId}/executing`);
+    } catch (err: any) {
+      toast.error(`설문 재시작 실패: ${err.message}`);
+      setIsRetrying(false);
+    }
+  };
+
   const handleExportCSV = () => {
     if (!results) return;
 
@@ -190,275 +217,317 @@ export default function ResultsPage() {
         <Badge className={`${modeInfo.color} text-white`}>{modeInfo.label}</Badge>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              총 응답 수
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold flex items-center gap-2">
-              <Users className="h-6 w-6 text-muted-foreground" />
-              {results.total_respondents}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Tabs for Results and QIE Analysis */}
+      <Tabs defaultValue="summary" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="summary" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            설문 결과
+          </TabsTrigger>
+          <TabsTrigger value="qie" className="flex items-center gap-2">
+            <Brain className="h-4 w-4" />
+            AI 심층 분석
+          </TabsTrigger>
+        </TabsList>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              평균 SSR 점수
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {(results.mean_score * 100).toFixed(1)}%
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              중앙값
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {(results.median_score * 100).toFixed(1)}%
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              실행 시간
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {results.execution_time.toFixed(1)}초
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Comparison Results - Only for A/B or Multi-Compare */}
-      {results.comparison_mode !== "single" && results.concept_scores && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Trophy className="h-5 w-5" />
-              컨셉별 점수 비교
-            </CardTitle>
-            <CardDescription>
-              {results.comparison_mode === "ab_test"
-                ? "두 컨셉의 SSR 점수를 비교합니다"
-                : "여러 컨셉의 SSR 점수를 비교합니다"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {results.concept_scores
-              .sort((a, b) => b.mean_score - a.mean_score)
-              .map((concept, idx) => (
-                <div key={concept.concept_id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={idx === 0 ? "default" : "outline"}
-                        className={idx === 0 ? "bg-yellow-500" : ""}
-                      >
-                        #{idx + 1}
-                      </Badge>
-                      <span className="font-medium">{concept.concept_title}</span>
-                      {idx === 0 && results.comparison_stats?.is_significant && (
-                        <Badge variant="outline" className="text-green-600 border-green-600">
-                          승자
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold">
-                        {(concept.mean_score * 100).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        ±{(concept.std_dev * 100).toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                  <Progress
-                    value={concept.mean_score * 100}
-                    className="h-3"
-                  />
+        <TabsContent value="summary" className="mt-6 space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  총 응답 수
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold flex items-center gap-2">
+                  <Users className="h-6 w-6 text-muted-foreground" />
+                  {results.total_respondents}
                 </div>
-              ))}
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
 
-      {/* Statistical Significance */}
-      {results.comparison_stats && results.comparison_stats.test_type !== "none" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FlaskConical className="h-5 w-5" />
-              통계적 유의성 분석
-            </CardTitle>
-            <CardDescription>
-              테스트: {results.comparison_stats.test_type === "t_test" ? "독립 표본 t-검정" : "일원분산분석 (ANOVA)"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-muted/50 rounded-lg">
-                <div className="text-sm text-muted-foreground mb-1">통계량</div>
-                <div className="text-xl font-bold">
-                  {results.comparison_stats.statistic?.toFixed(3) || "N/A"}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  평균 SSR 점수
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {(results.mean_score * 100).toFixed(1)}%
                 </div>
-              </div>
-              <div className="text-center p-4 bg-muted/50 rounded-lg">
-                <div className="text-sm text-muted-foreground mb-1">p-value</div>
-                <div className="text-xl font-bold">
-                  {results.comparison_stats.p_value?.toFixed(4) || "N/A"}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  중앙값
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {(results.median_score * 100).toFixed(1)}%
                 </div>
-              </div>
-              <div className="text-center p-4 bg-muted/50 rounded-lg">
-                <div className="text-sm text-muted-foreground mb-1">유의수준</div>
-                <div className="text-xl font-bold">
-                  α = 0.05
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  실행 시간
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {results.execution_time.toFixed(1)}초
                 </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="flex items-start gap-3">
-              <Badge
-                variant={results.comparison_stats.is_significant ? "default" : "secondary"}
-                className={results.comparison_stats.is_significant ? "bg-green-500" : ""}
-              >
-                {results.comparison_stats.is_significant ? "유의미함" : "유의미하지 않음"}
-              </Badge>
-              <p className="text-sm text-muted-foreground">
-                {results.comparison_stats.interpretation}
-              </p>
-            </div>
-
-            {results.comparison_stats.winner && (
-              <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <Trophy className="h-5 w-5 text-green-600" />
-                <span className="font-medium text-green-800">
-                  승자: {results.comparison_stats.winner}
-                </span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Score Distribution - Single Concept */}
-      {results.comparison_mode === "single" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>SSR 점수 분포</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {Object.entries(results.score_distribution)
-                .sort(([a], [b]) => parseFloat(b) - parseFloat(a))
-                .map(([score, count]) => {
-                  const percentage = ((count as number) / results.total_respondents) * 100;
-                  return (
-                    <div key={score} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span>점수 {score}</span>
-                        <span>
-                          {count}명 ({percentage.toFixed(1)}%)
-                        </span>
-                      </div>
-                      <div className="w-full bg-muted rounded-full h-2">
-                        <div
-                          className="bg-primary h-2 rounded-full"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Sample Responses */}
-      <Card>
-        <CardHeader>
-          <CardTitle>샘플 응답</CardTitle>
-          <CardDescription>
-            상위 10개 응답을 표시합니다
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {results.results.slice(0, 10).map((result, index) => (
-              <div
-                key={index}
-                className="border rounded-lg p-4 space-y-2 bg-muted/30"
-              >
-                <div className="flex justify-between items-start">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">
-                        {result.persona_id}
-                      </span>
-                      {result.concept_id && (
-                        <Badge variant="outline" className="text-xs">
-                          {result.concept_id}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {result.demographics.age}세 • {result.demographics.gender} •{" "}
-                      {result.demographics.income} • {result.demographics.location}
-                    </div>
-                  </div>
-                  <div className="text-lg font-bold">
-                    {(result.ssr_score * 100).toFixed(1)}%
-                  </div>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {result.response_text}
-                </div>
-              </div>
-            ))}
+              </CardContent>
+            </Card>
           </div>
 
-          {results.results.length > 10 && (
-            <div className="text-center text-sm text-muted-foreground mt-4">
-              {results.results.length}개 응답 중 10개 표시 중
-            </div>
+          {/* Comparison Results - Only for A/B or Multi-Compare */}
+          {results.comparison_mode !== "single" && results.concept_scores && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="h-5 w-5" />
+                  컨셉별 점수 비교
+                </CardTitle>
+                <CardDescription>
+                  {results.comparison_mode === "ab_test"
+                    ? "두 컨셉의 SSR 점수를 비교합니다"
+                    : "여러 컨셉의 SSR 점수를 비교합니다"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {results.concept_scores
+                  .sort((a, b) => b.mean_score - a.mean_score)
+                  .map((concept, idx) => (
+                    <div key={concept.concept_id} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Badge
+                            variant={idx === 0 ? "default" : "outline"}
+                            className={idx === 0 ? "bg-yellow-500" : ""}
+                          >
+                            #{idx + 1}
+                          </Badge>
+                          <span className="font-medium">{concept.concept_title}</span>
+                          {idx === 0 && results.comparison_stats?.is_significant && (
+                            <Badge variant="outline" className="text-green-600 border-green-600">
+                              승자
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold">
+                            {(concept.mean_score * 100).toFixed(1)}%
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            ±{(concept.std_dev * 100).toFixed(1)}%
+                          </div>
+                        </div>
+                      </div>
+                      <Progress
+                        value={concept.mean_score * 100}
+                        className="h-3"
+                      />
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Action Buttons */}
-      <div className="flex gap-4">
-        <Button variant="outline" className="flex-1" onClick={handleExportCSV}>
-          <Download className="mr-2 h-4 w-4" />
-          CSV 다운로드
-        </Button>
-        <Button variant="outline" className="flex-1" onClick={handleExportJSON}>
-          <Download className="mr-2 h-4 w-4" />
-          JSON 다운로드
-        </Button>
-        <Button className="flex-1" onClick={() => router.push("/")}>
-          <Home className="mr-2 h-4 w-4" />
-          새 설문 시작
-        </Button>
-      </div>
+          {/* Statistical Significance */}
+          {results.comparison_stats && results.comparison_stats.test_type !== "none" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FlaskConical className="h-5 w-5" />
+                  통계적 유의성 분석
+                </CardTitle>
+                <CardDescription>
+                  테스트: {results.comparison_stats.test_type === "t_test" ? "독립 표본 t-검정" : "일원분산분석 (ANOVA)"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-sm text-muted-foreground mb-1">통계량</div>
+                    <div className="text-xl font-bold">
+                      {results.comparison_stats.statistic?.toFixed(3) || "N/A"}
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-sm text-muted-foreground mb-1">p-value</div>
+                    <div className="text-xl font-bold">
+                      {results.comparison_stats.p_value?.toFixed(4) || "N/A"}
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-sm text-muted-foreground mb-1">유의수준</div>
+                    <div className="text-xl font-bold">
+                      α = 0.05
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-start gap-3">
+                  <Badge
+                    variant={results.comparison_stats.is_significant ? "default" : "secondary"}
+                    className={results.comparison_stats.is_significant ? "bg-green-500" : ""}
+                  >
+                    {results.comparison_stats.is_significant ? "유의미함" : "유의미하지 않음"}
+                  </Badge>
+                  <p className="text-sm text-muted-foreground">
+                    {results.comparison_stats.interpretation}
+                  </p>
+                </div>
+
+                {results.comparison_stats.winner && (
+                  <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <Trophy className="h-5 w-5 text-green-600" />
+                    <span className="font-medium text-green-800">
+                      승자: {results.comparison_stats.winner}
+                    </span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Score Distribution - Single Concept */}
+          {results.comparison_mode === "single" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>SSR 점수 분포</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {Object.entries(results.score_distribution)
+                    .sort(([a], [b]) => parseFloat(b) - parseFloat(a))
+                    .map(([score, count]) => {
+                      const percentage = ((count as number) / results.total_respondents) * 100;
+                      return (
+                        <div key={score} className="space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span>점수 {score}</span>
+                            <span>
+                              {count}명 ({percentage.toFixed(1)}%)
+                            </span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2">
+                            <div
+                              className="bg-primary h-2 rounded-full"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sample Responses */}
+          <Card>
+            <CardHeader>
+              <CardTitle>샘플 응답</CardTitle>
+              <CardDescription>
+                상위 10개 응답을 표시합니다
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {results.results.slice(0, 10).map((result, index) => (
+                  <div
+                    key={index}
+                    className="border rounded-lg p-4 space-y-2 bg-muted/30"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">
+                            {result.persona_id}
+                          </span>
+                          {result.concept_id && (
+                            <Badge variant="outline" className="text-xs">
+                              {result.concept_id}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {result.demographics.age}세 • {result.demographics.gender} •{" "}
+                          {result.demographics.income} • {result.demographics.location}
+                        </div>
+                      </div>
+                      <div className="text-lg font-bold">
+                        {(result.ssr_score * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {result.response_text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {results.results.length > 10 && (
+                <div className="text-center text-sm text-muted-foreground mt-4">
+                  {results.results.length}개 응답 중 10개 표시 중
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-4">
+              <Button variant="outline" className="flex-1" onClick={handleExportCSV}>
+                <Download className="mr-2 h-4 w-4" />
+                CSV 다운로드
+              </Button>
+              <Button variant="outline" className="flex-1" onClick={handleExportJSON}>
+                <Download className="mr-2 h-4 w-4" />
+                JSON 다운로드
+              </Button>
+            </div>
+            <div className="flex gap-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleRetrySurvey}
+                disabled={isRetrying}
+              >
+                <RotateCcw className={`mr-2 h-4 w-4 ${isRetrying ? "animate-spin" : ""}`} />
+                {isRetrying ? "재시작 중..." : "설문 다시 돌리기"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => router.push(`/workflows/${workflowId}/concepts`)}
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                컨셉 관리로 돌아가기
+              </Button>
+              <Button className="flex-1" onClick={() => router.push("/")}>
+                <Home className="mr-2 h-4 w-4" />
+                새 설문 시작
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* QIE Analysis Tab */}
+        <TabsContent value="qie" className="mt-6">
+          <QIEDashboard workflowId={workflowId} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

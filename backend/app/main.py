@@ -12,6 +12,7 @@ from .routes import (
     websocket_router,
     research_router,
     personas_router,
+    archetype_router,
     concepts_router,
     comparison_router,
     workflows_router,
@@ -19,6 +20,7 @@ from .routes import (
     generation_router,
     execution_router,
     websocket_workflow_router,
+    qie_router,
 )
 
 
@@ -65,6 +67,7 @@ app.include_router(surveys_router)
 app.include_router(websocket_router)
 app.include_router(research_router)
 app.include_router(personas_router)
+app.include_router(archetype_router)
 app.include_router(concepts_router)
 app.include_router(comparison_router)
 app.include_router(workflows_router)
@@ -72,3 +75,4 @@ app.include_router(research_workflow_router)
 app.include_router(generation_router)
 app.include_router(execution_router)
 app.include_router(websocket_workflow_router)
+app.include_router(qie_router)

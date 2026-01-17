@@ -1,4 +1,10 @@
-"""Enhanced persona generation service with distribution-aware sampling."""
+"""Enhanced persona generation service with distribution-aware sampling.
+
+Multi-Archetype Stratified Sampling Pipeline (v2.0):
+- Step 1: Segmentation - See research.py
+- Step 2: Distribution - distribute_samples_by_archetype() (Pure Python/NumPy)
+- Step 3: Enrichment - generate_enriched_personas_from_archetypes() (GPT-5-mini, verbosity: high)
+"""
 
 import os
 import numpy as np
@@ -9,6 +15,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 def _get_persona_model() -> str:
     """Get persona enrichment model from environment or fallback."""
     return os.getenv("PERSONA_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
+
+
+def _get_enrichment_model() -> str:
+    """Get enrichment model for Step 3 (cost-optimized with verbosity)."""
+    return os.getenv("ENRICHMENT_MODEL", "gpt-5-mini")
+
+
+def _get_enrichment_verbosity() -> str:
+    """Get enrichment verbosity setting (default: high for rich narratives)."""
+    return os.getenv("ENRICHMENT_VERBOSITY", "high")
 
 
 def generate_synthetic_sample(
@@ -55,27 +71,27 @@ def generate_synthetic_sample(
         income_probs = np.ones(len(income_choices)) / len(income_choices)
     income_brackets = np.random.choice(income_choices, sample_size, p=income_probs)
 
-    # 통화별 소득 범위 설정
+    # 통화별 소득 범위 설정 (일반 소비자 기준 월 가처분 소득)
     currency = core_persona.get("currency", "KRW")
 
     if currency == "KRW":
-        # 한국 대학생 월 가처분 소득 범위 (KRW)
-        # none: 용돈 없음/최소 (0~30만원)
-        # low: 저소득 (30~70만원)
-        # mid: 중간 (70~120만원)
-        # high: 고소득/금수저 (120~200만원)
+        # 한국 월 가처분 소득 범위 (KRW)
+        # none: 무소득/학생 (0~50만원)
+        # low: 저소득 (50~150만원)
+        # mid: 중소득 (150~300만원)
+        # high: 고소득 (300만원 이상)
         income_ranges = {
-            "none": (0, 300000),
-            "low": (300000, 700000),
-            "mid": (700000, 1200000),
-            "high": (1200000, 2000000)
+            "none": (0, 500000),
+            "low": (500000, 1500000),
+            "mid": (1500000, 3000000),
+            "high": (3000000, 5000000)
         }
     else:  # USD
         # US monthly disposable income ranges (USD)
         # none: minimal/student ($0-$500)
-        # low: low income ($500-$2000)
-        # mid: middle income ($2000-$5000)
-        # high: high income ($5000-$10000)
+        # low: low income ($500-$2,000)
+        # mid: middle income ($2,000-$5,000)
+        # high: high income ($5,000+)
         income_ranges = {
             "none": (0, 500),
             "low": (500, 2000),
@@ -473,4 +489,424 @@ def calculate_distribution_stats(personas: list[dict]) -> dict:
         },
         "gender": gender_counts,
         "income": income_counts
+    }
+
+
+# =============================================================================
+# Multi-Archetype Stratified Sampling Pipeline (v2.0)
+# =============================================================================
+
+
+def distribute_samples_by_archetype(
+    archetypes: list[dict],
+    total_samples: int = 1000,
+) -> list[dict]:
+    """
+    Step 2: Distribution - 수학적 비율 배분 (No LLM, Pure Python/NumPy).
+
+    정의된 share_ratio에 따라 전체 표본(N)을 그룹별로 할당합니다.
+    할루시네이션 원천 차단을 위해 LLM을 사용하지 않습니다.
+
+    Args:
+        archetypes: Step 1에서 생성된 Archetype 리스트 (share_ratio 포함)
+        total_samples: 생성할 총 페르소나 수 (기본값: 1000)
+
+    Returns:
+        distribution_plan: 각 archetype별 할당 수가 포함된 리스트
+    """
+    distribution_plan = []
+    allocated = 0
+
+    sorted_archetypes = sorted(
+        archetypes,
+        key=lambda x: x.get("share_ratio", 0),
+        reverse=True
+    )
+
+    for i, archetype in enumerate(sorted_archetypes):
+        share_ratio = archetype.get("share_ratio", 0)
+
+        if i == len(sorted_archetypes) - 1:
+            count = total_samples - allocated
+        else:
+            count = int(total_samples * share_ratio)
+
+        allocated += count
+
+        distribution_plan.append({
+            "segment_id": archetype.get("segment_id", f"SEGMENT_{i+1:02d}"),
+            "segment_name": archetype.get("segment_name", f"Segment {i+1}"),
+            "archetype": archetype,
+            "count": count,
+            "share_ratio": share_ratio,
+            "actual_ratio": count / total_samples,
+        })
+
+    return distribution_plan
+
+
+def generate_personas_for_archetype(
+    archetype: dict,
+    count: int,
+    start_id: int = 0,
+    currency: str = "KRW",
+    random_seed: Optional[int] = None,
+) -> list[dict]:
+    """
+    단일 Archetype에 대한 페르소나 N개 생성 (Step 3 전처리).
+
+    Archetype의 속성(연령대, 성별 분포, 소득 수준 등)을 유지하면서
+    개별 페르소나의 변이를 생성합니다.
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    personas = []
+
+    demographics = archetype.get("demographics", {})
+    age_range = demographics.get("age_range", [20, 30])
+    age_mean = (age_range[0] + age_range[1]) / 2
+    age_std = (age_range[1] - age_range[0]) / 6
+    ages = np.random.normal(age_mean, age_std, count)
+    ages = np.clip(ages, age_range[0], age_range[1]).astype(int)
+
+    gender_dist = demographics.get("gender_distribution", {"female": 50, "male": 50})
+    gender_choices = list(gender_dist.keys())
+    gender_probs = np.array([gender_dist.get(g, 50) for g in gender_choices], dtype=np.float64)
+    gender_probs = gender_probs / gender_probs.sum()
+    genders = np.random.choice(gender_choices, count, p=gender_probs)
+
+    income_level = archetype.get("income_level", "mid")
+    income_dist = _get_income_distribution_for_level(income_level)
+    income_choices = list(income_dist.keys())
+    income_probs = np.array(list(income_dist.values()), dtype=np.float64)
+    income_brackets = np.random.choice(income_choices, count, p=income_probs)
+
+    if currency == "KRW":
+        income_ranges = {
+            "none": (0, 500000),          # 0~50만원
+            "low": (500000, 1500000),     # 50~150만원
+            "mid": (1500000, 3000000),    # 150~300만원
+            "high": (3000000, 5000000)    # 300만원+
+        }
+    else:
+        income_ranges = {
+            "none": (0, 500),             # $0~500
+            "low": (500, 2000),           # $500~2000
+            "mid": (2000, 5000),          # $2000~5000
+            "high": (5000, 10000)         # $5000+
+        }
+
+    incomes = [
+        np.random.randint(*income_ranges.get(bracket, income_ranges["mid"]))
+        for bracket in income_brackets
+    ]
+
+    base_category_usage = archetype.get("category_usage", "medium")
+    category_usage_dist = _get_category_usage_distribution(base_category_usage)
+    category_usages = np.random.choice(
+        list(category_usage_dist.keys()),
+        count,
+        p=list(category_usage_dist.values())
+    )
+
+    base_shopping_behavior = archetype.get("shopping_behavior", "smart_shopper")
+    shopping_behavior_dist = _get_shopping_behavior_distribution(base_shopping_behavior)
+    shopping_behaviors = np.random.choice(
+        list(shopping_behavior_dist.keys()),
+        count,
+        p=list(shopping_behavior_dist.values())
+    )
+
+    location = archetype.get("location", "urban")
+    core_traits = archetype.get("core_traits", [])
+    pain_points = archetype.get("pain_points", ["general concern"])
+    decision_drivers = archetype.get("decision_drivers", ["quality", "price"])
+
+    for i in range(count):
+        persona = {
+            "id": f"PERSONA_{start_id + i + 1:05d}",
+            "segment_id": archetype.get("segment_id"),
+            "segment_name": archetype.get("segment_name"),
+            "age": int(ages[i]),
+            "gender": genders[i],
+            "income_bracket": income_brackets[i],
+            "income_value": incomes[i],
+            "currency": currency,
+            "location": location,
+            "category_usage": category_usages[i],
+            "shopping_behavior": shopping_behaviors[i],
+            "core_traits": core_traits,
+            "pain_points": _vary_pain_points(pain_points, start_id + i),
+            "decision_drivers": _vary_decision_drivers(decision_drivers, start_id + i),
+        }
+        personas.append(persona)
+
+    return personas
+
+
+def _get_income_distribution_for_level(income_level: str) -> dict[str, float]:
+    """소득 레벨에 따른 소득 분포 생성."""
+    distributions = {
+        "none": {"none": 0.6, "low": 0.3, "mid": 0.1, "high": 0.0},
+        "low": {"none": 0.2, "low": 0.5, "mid": 0.25, "high": 0.05},
+        "mid": {"none": 0.05, "low": 0.2, "mid": 0.55, "high": 0.2},
+        "high": {"none": 0.0, "low": 0.1, "mid": 0.3, "high": 0.6},
+    }
+    return distributions.get(income_level, distributions["mid"])
+
+
+def enrich_persona_with_llm_v2(
+    persona: dict,
+    product_context: Optional[str] = None,
+    model: Optional[str] = None,
+    client: Optional["openai.OpenAI"] = None,
+    temperature: float = 0.8,
+) -> dict:
+    """
+    Step 3: Enrichment - GPT-5-mini + verbosity: high로 풍부한 서사 생성.
+
+    GPT-5.2 계열의 verbosity 파라미터를 활용하여 페르소나의 Bio와
+    사연을 구체적이고 길게 서술합니다.
+
+    Per GPT-5.2 guidelines:
+    - reasoning: none (단순 창작 작업이므로 추론 대기 시간 제거)
+    - verbosity: high (풍부한 데이터 생성)
+    - temperature: 0.8 (다양성 확보, reasoning=none일 때만 가능)
+
+    Args:
+        persona: 기본 페르소나 dict
+        product_context: 제품/서비스 카테고리 컨텍스트
+        model: 사용할 모델 (기본값: gpt-5-mini)
+        client: OpenAI 클라이언트
+        temperature: 샘플링 온도 (기본값: 0.8)
+
+    Returns:
+        Enriched persona dict with 'bio' field
+    """
+    import openai
+
+    if client is None:
+        client = openai.OpenAI()
+
+    model = model or _get_enrichment_model()
+    verbosity = _get_enrichment_verbosity()
+    currency = persona.get("currency", "KRW")
+
+    if currency == "KRW":
+        prompt = _create_korean_enrichment_prompt_v2(persona, product_context)
+    else:
+        prompt = _create_english_enrichment_prompt_v2(persona, product_context)
+
+    response = client.responses.create(
+        model=model,
+        input=prompt,
+        max_output_tokens=400,
+        reasoning={"effort": "none"},
+        text={"verbosity": verbosity},
+        temperature=temperature,
+    )
+
+    bio_text = response.output_text.strip()
+
+    enriched = persona.copy()
+    enriched["bio"] = bio_text
+    enriched["enriched"] = True
+    enriched["enrichment_model"] = model
+
+    return enriched
+
+
+def _create_korean_enrichment_prompt_v2(persona: dict, product_context: Optional[str]) -> str:
+    """Step 3용 한국어 enrichment 프롬프트 (High Verbosity 모드)."""
+    gender_text = {"female": "여성", "male": "남성"}
+    income_formatted = f"{persona['income_value']:,}원"
+
+    traits_text = ""
+    if persona.get("core_traits"):
+        traits_text = f"\n- 핵심 특성: {', '.join(persona['core_traits'])}"
+
+    context_line = ""
+    if product_context:
+        context_line = f"\n관련 서비스/제품: {product_context}"
+
+    segment_info = ""
+    if persona.get("segment_name"):
+        segment_info = f"\n- 소비자 유형: {persona['segment_name']}"
+
+    return f"""너는 창의적인 작가야. 다음 프로필의 인물이 가질 법한 '구체적인 배경 스토리'와 '현재 상황', '고민'을 1인칭 시점의 자연스러운 한국어로 아주 상세하게 기술해줘.
+
+[프로필]
+- 나이: {persona['age']}세
+- 성별: {gender_text.get(persona['gender'], persona['gender'])}
+- 월 가처분 소득: 약 {income_formatted}
+- 소비 성향: {persona['shopping_behavior']}
+- 제품/서비스 사용 경험: {persona['category_usage']}{segment_info}{traits_text}
+- 기존 고민: {', '.join(persona['pain_points'])}
+- 구매 결정 요인: {', '.join(persona['decision_drivers'])}{context_line}
+
+[지시사항]
+- 'High Verbosity' 모드이므로, 유저의 배경 스토리를 아주 상세하게 기술해줘
+- 숫자(나이, 소득)를 직접 언급하지 마
+- 자연스러운 구어체로 작성해
+- 해당 인물의 경제적 상황과 라이프스타일, 가치관을 생생하게 반영해
+- 이 인물만의 구체적인 사연과 말투를 창작해"""
+
+
+def _create_english_enrichment_prompt_v2(persona: dict, product_context: Optional[str]) -> str:
+    """Step 3용 영어 enrichment 프롬프트 (High Verbosity 모드)."""
+    income_formatted = f"${persona['income_value']:,}"
+
+    traits_text = ""
+    if persona.get("core_traits"):
+        traits_text = f"\n- Core traits: {', '.join(persona['core_traits'])}"
+
+    context_line = ""
+    if product_context:
+        context_line = f"\nRelevant product/service: {product_context}"
+
+    segment_info = ""
+    if persona.get("segment_name"):
+        segment_info = f"\n- Consumer type: {persona['segment_name']}"
+
+    return f"""You are a creative writer. Create a detailed background story, current situation, and concerns for a person with this profile, written in first-person perspective with rich narrative detail.
+
+[Profile]
+- Age: {persona['age']}
+- Gender: {persona['gender']}
+- Monthly disposable income: approximately {income_formatted}
+- Shopping behavior: {persona['shopping_behavior']}
+- Category usage: {persona['category_usage']}{segment_info}{traits_text}
+- Core concerns: {', '.join(persona['pain_points'])}
+- Purchase decision factors: {', '.join(persona['decision_drivers'])}{context_line}
+
+[Instructions]
+- This is 'High Verbosity' mode, so write a very detailed background story
+- Do not explicitly mention numbers (age, income)
+- Write in natural conversational language
+- Vividly reflect this person's financial situation, lifestyle, and values
+- Create a unique personal story and speaking style for this individual"""
+
+
+def enrich_personas_batch_v2(
+    personas: list[dict],
+    product_context: Optional[str] = None,
+    model: Optional[str] = None,
+    max_workers: int = 10,
+    temperature: float = 0.8,
+) -> list[dict]:
+    """
+    Step 3: Batch Enrichment - 다중 페르소나 병렬 처리.
+
+    Args:
+        personas: 기본 페르소나 리스트
+        product_context: 제품/서비스 카테고리
+        model: 사용할 모델 (기본값: gpt-5-mini)
+        max_workers: 최대 병렬 API 호출 수
+        temperature: 샘플링 온도
+
+    Returns:
+        Enriched personas 리스트
+    """
+    import openai
+
+    model = model or _get_enrichment_model()
+    client = openai.OpenAI()
+    enriched_personas = [None] * len(personas)
+
+    def enrich_single(idx: int, persona: dict) -> tuple[int, dict]:
+        enriched = enrich_persona_with_llm_v2(
+            persona, product_context, model, client, temperature
+        )
+        return idx, enriched
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(enrich_single, i, p): i
+            for i, p in enumerate(personas)
+        }
+
+        for future in as_completed(futures):
+            idx, enriched = future.result()
+            enriched_personas[idx] = enriched
+
+    return enriched_personas
+
+
+def generate_enriched_personas_from_archetypes(
+    archetypes: list[dict],
+    total_samples: int = 1000,
+    product_context: Optional[str] = None,
+    currency: str = "KRW",
+    enrich: bool = True,
+    max_workers: int = 10,
+    random_seed: Optional[int] = None,
+) -> dict:
+    """
+    Multi-Archetype Stratified Sampling 파이프라인 전체 실행.
+
+    Step 2 (Distribution) + Step 3 (Enrichment)를 통합 실행합니다.
+
+    Args:
+        archetypes: Step 1에서 생성된 Archetype 리스트
+        total_samples: 생성할 총 페르소나 수
+        product_context: 제품/서비스 카테고리
+        currency: 통화 (KRW 또는 USD)
+        enrich: LLM enrichment 적용 여부
+        max_workers: 병렬 처리 워커 수
+        random_seed: 재현성을 위한 랜덤 시드
+
+    Returns:
+        dict containing:
+        - personas: 생성된 전체 페르소나 리스트
+        - distribution_plan: 각 archetype별 할당 정보
+        - stats: 분포 통계
+    """
+    distribution_plan = distribute_samples_by_archetype(archetypes, total_samples)
+
+    all_personas = []
+    current_id = 0
+
+    for plan in distribution_plan:
+        archetype = plan["archetype"]
+        count = plan["count"]
+
+        segment_seed = None
+        if random_seed is not None:
+            segment_seed = random_seed + current_id
+
+        segment_personas = generate_personas_for_archetype(
+            archetype=archetype,
+            count=count,
+            start_id=current_id,
+            currency=currency,
+            random_seed=segment_seed,
+        )
+
+        all_personas.extend(segment_personas)
+        current_id += count
+
+    if enrich:
+        all_personas = enrich_personas_batch_v2(
+            personas=all_personas,
+            product_context=product_context,
+            max_workers=max_workers,
+        )
+
+    stats = calculate_distribution_stats(all_personas)
+
+    segment_stats = {}
+    for persona in all_personas:
+        seg_id = persona.get("segment_id", "unknown")
+        if seg_id not in segment_stats:
+            segment_stats[seg_id] = {"count": 0, "segment_name": persona.get("segment_name")}
+        segment_stats[seg_id]["count"] += 1
+
+    return {
+        "personas": all_personas,
+        "distribution_plan": distribution_plan,
+        "stats": stats,
+        "segment_stats": segment_stats,
+        "total_count": len(all_personas),
+        "enriched": enrich,
     }

@@ -13,12 +13,17 @@ from ..models.workflow import (
     ConceptsRequest,
     ProductDescription,
     CorePersona,
+    ArchetypeSegment,
 )
 from ..models.comparison import ConceptInput
 from ..services.workflow import get_workflow_service
 from ..services.product import (
     assist_product_description,
     assist_product_description_mock,
+    chat_product_description,
+)
+from ..services.persona_generation import (
+    generate_enriched_personas_from_archetypes,
 )
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -107,6 +112,14 @@ async def create_workflow(copy_from: str = Query(None, description="Copy product
                     workflow.current_step = 5
                     workflow.status = WorkflowStatus.GENERATING_PERSONAS
 
+                # Copy archetypes (for multi-archetype mode)
+                if source_workflow.archetypes:
+                    workflow.archetypes = [
+                        ArchetypeSegment(**a.model_dump()) for a in source_workflow.archetypes
+                    ]
+                    workflow.use_multi_archetype = source_workflow.use_multi_archetype
+                    workflow.currency = source_workflow.currency
+
                 # Save updated workflow
                 service._save_to_database(workflow)
                 service._workflows[workflow.id] = workflow
@@ -171,6 +184,48 @@ async def assist_product(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ChatMessage(BaseModel):
+    """Chat message model."""
+
+    role: str
+    content: str
+
+
+class ProductChatRequest(BaseModel):
+    """Request for product chat."""
+
+    messages: list[ChatMessage]
+    current_data: dict | None = None
+
+
+class ProductChatResponse(BaseModel):
+    """Response for product chat."""
+
+    message: str
+    extracted_data: dict | None = None
+
+
+@router.post("/products/chat", response_model=ProductChatResponse)
+async def chat_product(request: ProductChatRequest):
+    """Chat-based AI assistance for product description.
+
+    This endpoint provides conversational assistance to help users
+    create a product description through natural dialogue.
+    """
+    try:
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        result = await chat_product_description(
+            messages=messages,
+            current_data=request.current_data,
+        )
+        return ProductChatResponse(**result)
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{workflow_id}/product", response_model=SurveyWorkflow)
 async def update_product(workflow_id: str, request: ProductDescriptionRequest):
     """Update product description (Step 1).
@@ -227,11 +282,44 @@ async def update_persona(workflow_id: str, request: CorePersonaRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ArchetypesRequest(BaseModel):
+    """Request for saving selected archetypes."""
+
+    archetypes: list[dict]
+    currency: str = "KRW"
+
+
+@router.post("/{workflow_id}/archetypes", response_model=SurveyWorkflow)
+async def update_archetypes(workflow_id: str, request: ArchetypesRequest):
+    """Update selected archetypes (Step 2 - Multi-Archetype mode).
+
+    Saves the selected archetypes for stratified persona generation.
+    This is an alternative to the single core_persona approach.
+    """
+    service = get_workflow_service()
+
+    try:
+        archetypes = [
+            ArchetypeSegment(**arch) for arch in request.archetypes
+        ]
+
+        workflow = service.update_archetypes(
+            workflow_id, archetypes, request.currency
+        )
+        return workflow
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{workflow_id}/confirm", response_model=SurveyWorkflow)
 async def confirm_persona(workflow_id: str):
-    """Confirm core persona (Step 3).
+    """Confirm core persona or archetypes (Step 3).
 
-    User confirms the persona and advances to sample size selection.
+    User confirms the persona/archetypes and advances to sample size selection.
+    Works for both single persona mode and multi-archetype mode.
     """
     service = get_workflow_service()
 
@@ -250,11 +338,27 @@ async def set_sample_size(workflow_id: str, request: SampleSizeRequest):
     """Set sample size (Step 4).
 
     User selects how many synthetic personas to generate.
-    Valid range: 100-10,000
+    Valid range: 10-10,000
+
+    Supports two modes:
+    - Single Archetype: Uses core_persona from Step 2
+    - Multi-Archetype (v2.0): Uses archetypes for stratified sampling
     """
     service = get_workflow_service()
 
     try:
+        workflow = service.get_workflow(workflow_id)
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        # Update Multi-Archetype settings
+        workflow.use_multi_archetype = request.use_multi_archetype
+
+        if request.use_multi_archetype and request.archetypes:
+            workflow.archetypes = [
+                ArchetypeSegment(**arch) for arch in request.archetypes
+            ]
+
         workflow = service.set_sample_size(workflow_id, request.sample_size)
         return workflow
 

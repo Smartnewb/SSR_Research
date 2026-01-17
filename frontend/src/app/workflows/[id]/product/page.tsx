@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import ProductChatPanel from "@/components/product/ProductChatPanel";
 
 export default function ProductDescriptionPage() {
   const params = useParams();
@@ -24,8 +25,8 @@ export default function ProductDescriptionPage() {
 
   const [featureInput, setFeatureInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [assisting, setAssisting] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
     loadWorkflowData();
@@ -83,46 +84,12 @@ export default function ProductDescriptionPage() {
     });
   };
 
-  const handleGetAIHelp = async () => {
-    if (!formData.name || !formData.description) {
-      alert("Please enter product name and brief description first");
-      return;
-    }
+  const handleGetAIHelp = () => {
+    setChatOpen(true);
+  };
 
-    setAssisting(true);
-    try {
-      const response = await fetch(
-        "http://localhost:8000/api/workflows/products/assist?use_mock=true",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            product_name: formData.name,
-            brief_description: formData.description,
-            target_audience: formData.target_market,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to get AI assistance");
-      }
-
-      const data = await response.json();
-      setFormData({
-        ...formData,
-        category: data.category,
-        description: data.description,
-        features: data.features,
-        price_point: data.price_point,
-        target_market: data.target_market,
-      });
-    } catch (error) {
-      console.error("Error getting AI help:", error);
-      alert("Failed to get AI assistance");
-    } finally {
-      setAssisting(false);
-    }
+  const handleChatApply = (data: typeof formData) => {
+    setFormData(data);
   };
 
   const handleSubmit = async () => {
@@ -275,11 +242,10 @@ export default function ProductDescriptionPage() {
             </Button>
             <Button
               onClick={handleGetAIHelp}
-              disabled={assisting}
               variant="outline"
               className="flex-1"
             >
-              {assisting ? "Getting AI Help..." : "Get AI Help"}
+              Get AI Help
             </Button>
             <Button
               onClick={handleSubmit}
@@ -291,6 +257,13 @@ export default function ProductDescriptionPage() {
           </div>
         </CardContent>
       </Card>
+
+      <ProductChatPanel
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        onApply={handleChatApply}
+        initialData={formData}
+      />
     </div>
   );
 }

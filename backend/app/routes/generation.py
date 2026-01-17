@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..services.persona_generation import (
     generate_synthetic_sample,
     calculate_distribution_stats,
+    generate_enriched_personas_from_archetypes,
 )
 from ..services.workflow import get_workflow_service
 from ..services import database as db
@@ -89,7 +90,12 @@ def _load_result_from_db(job_id: str) -> GenerationResult | None:
 
 
 async def _generate_personas_background(
-    job_id: str, workflow_id: str, core_persona: dict, sample_size: int
+    job_id: str,
+    workflow_id: str,
+    sample_size: int,
+    core_persona: dict | None = None,
+    archetypes: list[dict] | None = None,
+    use_multi_archetype: bool = False,
 ):
     """Background task for generating personas."""
     try:
@@ -98,7 +104,17 @@ async def _generate_personas_background(
 
         await asyncio.sleep(0.5)
 
-        personas = generate_synthetic_sample(core_persona, sample_size)
+        if use_multi_archetype and archetypes:
+            # Multi-Archetype 모드: archetype 기반 생성
+            result_data = generate_enriched_personas_from_archetypes(
+                archetypes=archetypes,
+                total_samples=sample_size,
+                enrich=False,  # enrichment는 별도 옵션으로 처리
+            )
+            personas = result_data.get("personas", [])
+        else:
+            # 단일 Persona 모드: core_persona 기반 생성
+            personas = generate_synthetic_sample(core_persona, sample_size)
 
         _generation_jobs[job_id].generated_count = len(personas)
         _generation_jobs[job_id].progress = 1.0
@@ -132,7 +148,7 @@ async def start_generation(workflow_id: str, background_tasks: BackgroundTasks):
     """Start persona generation (Step 5).
 
     This triggers background generation of N persona variations
-    based on the core persona and sample size.
+    based on either core_persona (single mode) or archetypes (multi mode).
     """
     workflow_service = get_workflow_service()
     workflow = workflow_service.get_workflow(workflow_id)
@@ -140,11 +156,16 @@ async def start_generation(workflow_id: str, background_tasks: BackgroundTasks):
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    if not workflow.core_persona:
-        raise HTTPException(status_code=400, detail="Core persona not set")
-
     if not workflow.sample_size:
         raise HTTPException(status_code=400, detail="Sample size not set")
+
+    # Multi-Archetype 또는 Single Persona 중 하나는 있어야 함
+    use_multi_archetype = workflow.use_multi_archetype and len(workflow.archetypes) > 0
+    if not use_multi_archetype and not workflow.core_persona:
+        raise HTTPException(
+            status_code=400,
+            detail="Either core_persona or archetypes must be set"
+        )
 
     job_id = f"GEN_{uuid.uuid4().hex[:8].upper()}"
     now = datetime.now(timezone.utc)
@@ -164,13 +185,23 @@ async def start_generation(workflow_id: str, background_tasks: BackgroundTasks):
 
     workflow_service.start_persona_generation(workflow_id, job_id)
 
-    core_persona_dict = workflow.core_persona.model_dump()
+    # Multi-Archetype 모드 vs 단일 Persona 모드
+    core_persona_dict = None
+    archetypes_list = None
+
+    if use_multi_archetype:
+        archetypes_list = [arch.model_dump() for arch in workflow.archetypes]
+    else:
+        core_persona_dict = workflow.core_persona.model_dump()
+
     background_tasks.add_task(
         _generate_personas_background,
         job_id,
         workflow_id,
-        core_persona_dict,
         workflow.sample_size,
+        core_persona_dict,
+        archetypes_list,
+        use_multi_archetype,
     )
 
     return status

@@ -109,7 +109,7 @@ export default function ExecutingSurveyPage() {
         }
 
         const response = await fetch(
-          `http://localhost:8000/api/workflows/${workflowId}/execute/start?use_mock=true`,
+          `http://localhost:8000/api/workflows/${workflowId}/execute/start?use_mock=false`,
           {
             method: "POST",
           }
@@ -160,6 +160,22 @@ export default function ExecutingSurveyPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Step 7: 설문 실행 중</h1>
         <div className="text-sm text-muted-foreground">7단계 중 7단계</div>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-300 rounded-lg p-4">
+        <div className="flex items-start gap-3">
+          <span className="text-blue-600 text-xl">🔬</span>
+          <div>
+            <p className="font-semibold text-blue-900">SSR 논문 방식으로 실제 설문 실행 중</p>
+            <p className="text-sm text-blue-800 mt-1">
+              GPT를 사용하여 각 페르소나의 <strong>자유 텍스트 응답</strong>을 수집하고,
+              임베딩 기반 <strong>Semantic Similarity Rating</strong>으로 구매 의향을 측정합니다.
+            </p>
+            <p className="text-xs text-blue-700 mt-2">
+              API 비용이 발생합니다. 100명 기준 약 $0.5~1 예상.
+            </p>
+          </div>
+        </div>
       </div>
 
       {workflow?.concepts && workflow.concepts.length > 0 && (

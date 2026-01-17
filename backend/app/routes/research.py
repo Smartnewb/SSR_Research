@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.app.models.research import (
@@ -14,17 +14,25 @@ from backend.app.models.research import (
     ParseReportResponse,
     SaveCorePersonaRequest,
     SaveCorePersonaResponse,
+    SegmentMarketRequest,
+    SegmentMarketResponse,
+    GeneratePersonasRequest as ArchetypeGenerateRequest,
+    GeneratePersonasResponse as ArchetypeGenerateResponse,
+    Archetype,
 )
 from backend.app.services.research import (
     generate_research_prompt,
     generate_research_prompt_mock,
     parse_research_report,
     parse_research_report_mock,
+    segment_market_from_report,
 )
 from backend.app.services.persona_generation import (
     generate_synthetic_sample,
     calculate_distribution_stats,
     persona_to_system_prompt,
+    distribute_samples_by_archetype,
+    generate_enriched_personas_from_archetypes,
 )
 
 router = APIRouter(prefix="/api/research-legacy", tags=["research-legacy"])
@@ -219,3 +227,175 @@ async def preview_personas(
         persona["system_prompt"] = persona_to_system_prompt(persona)
 
     return {"preview_personas": preview}
+
+
+# =============================================================================
+# Multi-Archetype Stratified Sampling Pipeline (v2.0)
+# =============================================================================
+
+archetype_router = APIRouter(prefix="/api/archetypes", tags=["archetypes"])
+
+_archetypes_store: dict[str, list[dict]] = {}
+
+
+@archetype_router.post("/segment", response_model=SegmentMarketResponse)
+async def segment_market(request: SegmentMarketRequest):
+    """
+    Step 1: Market Segmentation (GPT-5.2, reasoning: high).
+
+    Analyzes a Gemini Deep Research report and extracts 3-5 distinct
+    market segments (archetypes) with share ratios.
+
+    This endpoint uses high reasoning effort for deep analysis of the
+    research report to identify heterogeneous customer groups.
+    """
+    try:
+        result = await segment_market_from_report(
+            research_report=request.research_report,
+            product_category=request.product_category,
+            target_segments=request.target_segments,
+        )
+
+        session_id = f"SEG_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4].upper()}"
+        _archetypes_store[session_id] = result["archetypes"]
+
+        return SegmentMarketResponse(
+            archetypes=[Archetype(**arch) for arch in result["archetypes"]],
+            total_share=result["total_share"],
+            segment_count=result["segment_count"],
+            warnings=result.get("warnings", []),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@archetype_router.post("/distribute")
+async def distribute_samples(
+    archetypes: list[Archetype],
+    total_samples: int = Query(1000, ge=10, le=10000, description="Total samples (10-10000)"),
+):
+    """
+    Step 2: Distribution Preview (Pure Python/NumPy).
+
+    Calculates sample distribution across archetypes without LLM.
+    Use this to preview how samples will be allocated before generation.
+
+    Scale Strategy:
+    - Debug: 10-30 (quick validation)
+    - Pilot: 100-300 (trend analysis)
+    - Standard: 1000 (statistically significant)
+    - Massive: 10000+ (large-scale simulation)
+    """
+    try:
+        archetypes_dict = [arch.model_dump() for arch in archetypes]
+        distribution_plan = distribute_samples_by_archetype(archetypes_dict, total_samples)
+
+        return {
+            "total_samples": total_samples,
+            "distribution_plan": distribution_plan,
+            "segment_count": len(distribution_plan),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@archetype_router.post("/generate", response_model=ArchetypeGenerateResponse)
+async def generate_from_archetypes(request: ArchetypeGenerateRequest):
+    """
+    Steps 2+3: Distribution + Enrichment Pipeline.
+
+    Generates personas following archetype distributions and enriches them
+    with LLM-generated narratives (GPT-5-mini, verbosity: high).
+
+    Parameters:
+    - archetypes: List of market segments from Step 1
+    - total_samples: Number of personas to generate (10-10000)
+    - product_context: Product/service context for enrichment
+    - enrich: Enable LLM enrichment (default: True)
+    - random_seed: For reproducibility
+
+    Cost Estimation (with enrichment):
+    - 100 samples: ~$0.20
+    - 1000 samples: ~$2.00
+    - 10000 samples: ~$20.00
+    """
+    try:
+        archetypes_dict = [arch.model_dump() for arch in request.archetypes]
+
+        result = generate_enriched_personas_from_archetypes(
+            archetypes=archetypes_dict,
+            total_samples=request.total_samples,
+            product_context=request.product_context,
+            currency=request.currency,
+            enrich=request.enrich,
+            random_seed=request.random_seed,
+        )
+
+        return ArchetypeGenerateResponse(
+            personas=result["personas"],
+            distribution_plan=result["distribution_plan"],
+            stats=result["stats"],
+            segment_stats=result["segment_stats"],
+            total_count=result["total_count"],
+            enriched=result["enriched"],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@archetype_router.post("/full-pipeline")
+async def run_full_pipeline(
+    research_report: str = Body(..., min_length=100, description="Gemini Deep Research report"),
+    product_category: Optional[str] = None,
+    total_samples: int = Query(1000, ge=10, le=10000),
+    enrich: bool = True,
+    currency: str = "KRW",
+):
+    """
+    Complete Multi-Archetype Stratified Sampling Pipeline.
+
+    Runs all 3 steps in sequence:
+    1. Segmentation (GPT-5.2, reasoning: high)
+    2. Distribution (Pure Python)
+    3. Enrichment (GPT-5-mini, verbosity: high)
+
+    Use this for end-to-end persona generation from a research report.
+    """
+    try:
+        # Step 1: Segment
+        segmentation_result = await segment_market_from_report(
+            research_report=research_report,
+            product_category=product_category,
+            target_segments=4,
+        )
+
+        # Steps 2+3: Distribute & Enrich
+        generation_result = generate_enriched_personas_from_archetypes(
+            archetypes=segmentation_result["archetypes"],
+            total_samples=total_samples,
+            product_context=product_category,
+            currency=currency,
+            enrich=enrich,
+        )
+
+        return {
+            "pipeline_status": "completed",
+            "segmentation": {
+                "archetypes": segmentation_result["archetypes"],
+                "segment_count": segmentation_result["segment_count"],
+                "warnings": segmentation_result.get("warnings", []),
+            },
+            "generation": {
+                "total_count": generation_result["total_count"],
+                "distribution_plan": generation_result["distribution_plan"],
+                "segment_stats": generation_result["segment_stats"],
+                "enriched": generation_result["enriched"],
+            },
+            "personas": generation_result["personas"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

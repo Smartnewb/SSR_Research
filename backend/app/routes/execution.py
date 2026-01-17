@@ -1,6 +1,8 @@
 """Survey execution API routes for workflow."""
 
 import asyncio
+import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -10,6 +12,7 @@ from pydantic import BaseModel
 from scipy import stats
 import numpy as np
 
+from ..core.config import settings  # Triggers load_dotenv() for OPENAI_API_KEY
 from ..services.survey import SurveyService
 from ..services.workflow import get_workflow_service
 from ..services.persona_generation import persona_to_system_prompt
@@ -19,6 +22,35 @@ from ..routes.generation import (
     _generation_results,
     _load_result_from_db as _load_generation_result_from_db,
 )
+
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# SSRPipeline Singleton (initialized once, reused across requests)
+# =============================================================================
+_pipeline_instance = None
+_pipeline_lock = asyncio.Lock()
+
+# Maximum concurrent API calls (respects OpenAI rate limits)
+MAX_CONCURRENT_SURVEYS = 10
+
+
+async def _get_pipeline():
+    """Get or create SSRPipeline singleton.
+
+    Initializes the pipeline only once, then reuses for all subsequent calls.
+    This avoids re-computing anchor embeddings for each persona.
+    """
+    global _pipeline_instance
+    if _pipeline_instance is None:
+        async with _pipeline_lock:
+            if _pipeline_instance is None:
+                from src.pipeline import SSRPipeline
+                logger.info("Initializing SSRPipeline singleton...")
+                _pipeline_instance = SSRPipeline()
+                await asyncio.to_thread(_pipeline_instance.initialize)
+                logger.info("SSRPipeline initialized successfully")
+    return _pipeline_instance
 
 router = APIRouter(prefix="/api/workflows/{workflow_id}/execute", tags=["execution"])
 
@@ -205,41 +237,60 @@ def _calculate_comparison_stats(
         )
 
 
-async def _execute_single_concept_survey(
+async def _survey_single_persona(
+    semaphore: asyncio.Semaphore,
+    pipeline,
+    persona: dict,
+    product_description: str,
     concept_id: str,
     concept_title: str,
-    product_description: str,
-    personas: list[dict],
     use_mock: bool,
-    progress_callback=None,
-) -> ConceptScore:
-    """Execute survey for a single concept and return scores."""
-    results = []
+    persona_index: int,
+    on_complete=None,
+) -> dict:
+    """Survey a single persona with concurrency control.
 
-    for i, persona in enumerate(personas):
+    Args:
+        semaphore: Limits concurrent API calls
+        pipeline: SSRPipeline instance (shared singleton)
+        persona: Persona data dict
+        product_description: Product description for survey
+        concept_id: Concept identifier
+        concept_title: Concept title
+        use_mock: Whether to use mock responses
+        persona_index: Index for mock score variation
+        on_complete: Callback called when this persona survey completes
+
+    Returns:
+        Survey result dict with ssr_score and response_text
+    """
+    async with semaphore:
         system_prompt = persona_to_system_prompt(persona)
 
         if use_mock:
-            await asyncio.sleep(0.01)
-            # Vary mock scores slightly by concept to show difference
+            await asyncio.sleep(0.05)  # Slightly longer for visible progress
             base_score = 0.5 + hash(concept_id) % 30 / 100
-            ssr_score = base_score + (i % 10) * 0.02
+            ssr_score = base_score + (persona_index % 10) * 0.02
             ssr_score = min(max(ssr_score, 0.0), 1.0)
             response_text = f"Mock response from persona {persona['id']} for {concept_title}"
         else:
-            from src.pipeline import SSRPipeline
+            try:
+                result = await asyncio.to_thread(
+                    pipeline.survey_single_persona,
+                    product_description=product_description,
+                    persona_data=persona,
+                    system_prompt=system_prompt,
+                )
+                ssr_score = result.ssr_score
+                response_text = result.response_text
+            except Exception as e:
+                logger.error(f"Survey API call failed for persona {persona['id']}: {e}")
+                raise RuntimeError(
+                    f"Survey API call failed: {e}. "
+                    "Please check your OpenAI API key and connection."
+                )
 
-            pipeline = SSRPipeline()
-            result = await asyncio.to_thread(
-                pipeline.survey_single_persona,
-                product_description=product_description,
-                persona_data=persona,
-                system_prompt=system_prompt,
-            )
-            ssr_score = result.ssr_score
-            response_text = result.response_text
-
-        results.append({
+        result_dict = {
             "persona_id": persona["id"],
             "concept_id": concept_id,
             "demographics": {
@@ -250,10 +301,63 @@ async def _execute_single_concept_survey(
             },
             "response_text": response_text,
             "ssr_score": ssr_score,
-        })
+        }
 
-        if progress_callback:
-            progress_callback(i + 1)
+        # Call completion callback for real-time progress updates
+        if on_complete:
+            on_complete()
+
+        return result_dict
+
+
+async def _execute_single_concept_survey(
+    concept_id: str,
+    concept_title: str,
+    product_description: str,
+    personas: list[dict],
+    use_mock: bool,
+    on_persona_complete=None,
+) -> ConceptScore:
+    """Execute survey for a single concept using parallel processing.
+
+    Uses asyncio.gather with Semaphore to run up to MAX_CONCURRENT_SURVEYS
+    persona surveys in parallel. This provides ~10x speedup over sequential.
+
+    Args:
+        on_persona_complete: Callback called each time a single persona completes
+    """
+    start_time = time.time()
+
+    # Get or initialize pipeline singleton
+    pipeline = await _get_pipeline() if not use_mock else None
+
+    # Create semaphore for concurrency control
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_SURVEYS)
+
+    # Create all survey tasks with individual completion callbacks
+    tasks = [
+        _survey_single_persona(
+            semaphore=semaphore,
+            pipeline=pipeline,
+            persona=persona,
+            product_description=product_description,
+            concept_id=concept_id,
+            concept_title=concept_title,
+            use_mock=use_mock,
+            persona_index=i,
+            on_complete=on_persona_complete,
+        )
+        for i, persona in enumerate(personas)
+    ]
+
+    # Execute all tasks in parallel (with semaphore limiting concurrency)
+    results = await asyncio.gather(*tasks)
+
+    elapsed = time.time() - start_time
+    logger.info(
+        f"Concept '{concept_title}': surveyed {len(personas)} personas "
+        f"in {elapsed:.1f}s ({len(personas)/elapsed:.1f} personas/sec)"
+    )
 
     scores = [r["ssr_score"] for r in results]
     mean_score, median_score, std_dev, score_distribution = _calculate_stats(scores)
@@ -265,7 +369,7 @@ async def _execute_single_concept_survey(
         median_score=median_score,
         std_dev=std_dev,
         score_distribution=score_distribution,
-        results=results,
+        results=list(results),
     )
 
 
@@ -281,17 +385,23 @@ async def _execute_survey_background(
         _execution_jobs[job_id].status = "executing"
         _save_job_to_db(_execution_jobs[job_id])
 
-        import time
         start_time = time.time()
 
         total_tasks = len(concepts) * len(personas)
         completed_tasks = 0
+        last_db_save = 0
 
-        def update_progress(count: int):
-            nonlocal completed_tasks
+        def on_persona_complete():
+            """Called when each individual persona survey completes."""
+            nonlocal completed_tasks, last_db_save
             completed_tasks += 1
             _execution_jobs[job_id].completed_count = completed_tasks
             _execution_jobs[job_id].progress = completed_tasks / total_tasks
+
+            # Save to DB every 5 completions to avoid too frequent writes
+            if completed_tasks - last_db_save >= 5 or completed_tasks == total_tasks:
+                _save_job_to_db(_execution_jobs[job_id])
+                last_db_save = completed_tasks
 
         # Execute survey for each concept
         concept_scores = []
@@ -309,7 +419,7 @@ async def _execute_survey_background(
                 product_description=product_desc,
                 personas=personas,
                 use_mock=use_mock,
-                progress_callback=update_progress,
+                on_persona_complete=on_persona_complete,
             )
             concept_scores.append(concept_score)
 
@@ -369,12 +479,20 @@ async def _execute_survey_background(
 
 @router.post("/start", response_model=ExecutionStatus)
 async def start_execution(
-    workflow_id: str, background_tasks: BackgroundTasks, use_mock: bool = False
+    workflow_id: str,
+    background_tasks: BackgroundTasks,
+    use_mock: bool = False,
+    force: bool = False,
 ):
     """Start survey execution (Step 7).
 
     This triggers background execution of the survey with all generated personas.
     Supports single concept, A/B testing (2 concepts), and multi-compare (3-5 concepts).
+
+    Args:
+        workflow_id: Workflow ID
+        use_mock: Use mock responses (no API calls)
+        force: Force re-run even if already completed
     """
     from ..models.workflow import WorkflowStatus
 
@@ -384,20 +502,28 @@ async def start_execution(
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # 이미 완료된 워크플로우면 에러 반환
+    # 이미 완료된 워크플로우면 에러 반환 (force=True면 재실행 허용)
     if workflow.status == WorkflowStatus.COMPLETED:
-        raise HTTPException(
-            status_code=400,
-            detail="Survey already completed. View results instead."
-        )
+        if not force:
+            raise HTTPException(
+                status_code=400,
+                detail="Survey already completed. Use force=true to re-run."
+            )
+        # force=True: 워크플로우 상태를 리셋하고 재실행
+        logger.info(f"Force re-running completed workflow {workflow_id}")
+        workflow.status = WorkflowStatus.CONCEPTS_CONFIRMED
+        workflow.survey_execution_job_id = None
 
-    # 이미 설문 실행 중이면 기존 job 상태 반환 (중복 실행 방지)
+    # 이미 설문 실행 중이면 기존 job 상태 반환 (중복 실행 방지, force=True면 새로 시작)
     if workflow.status == WorkflowStatus.SURVEYING and workflow.survey_execution_job_id:
-        existing_job = _execution_jobs.get(workflow.survey_execution_job_id)
-        if not existing_job:
-            existing_job = _load_job_from_db(workflow.survey_execution_job_id)
-        if existing_job and existing_job.status in ["queued", "executing"]:
-            return existing_job
+        if not force:
+            existing_job = _execution_jobs.get(workflow.survey_execution_job_id)
+            if not existing_job:
+                existing_job = _load_job_from_db(workflow.survey_execution_job_id)
+            if existing_job and existing_job.status in ["queued", "executing"]:
+                return existing_job
+        # force=True: 기존 job 무시하고 새로 시작
+        logger.info(f"Force re-starting survey for workflow {workflow_id}")
 
     if not workflow.product:
         raise HTTPException(status_code=400, detail="Product not set")

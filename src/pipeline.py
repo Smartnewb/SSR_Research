@@ -260,14 +260,10 @@ class SSRPipeline:
                 latency_ms=response["latency_ms"],
             )
 
-        return SurveyResult(
-            persona_id=persona_data.get("id", "unknown"),
-            response_text="",
-            ssr_score=0.0,
-            persona_data=persona_data,
-            tokens_used=0,
-            cost=0.0,
-            latency_ms=0,
+        # API call failed - raise exception instead of returning empty result
+        raise RuntimeError(
+            f"Failed to get survey response for persona {persona_data.get('id', 'unknown')}. "
+            "Check OpenAI API key and connection."
         )
 
     def run_survey_mock(

@@ -55,13 +55,44 @@ class CorePersona(BaseModel):
     currency: str = Field(default="KRW", description="Currency for income (KRW or USD)")
 
 
+class ArchetypeSegment(BaseModel):
+    """Single archetype segment for Multi-Archetype Stratified Sampling."""
+
+    segment_id: Optional[str] = None
+    segment_name: str
+    share_ratio: float = Field(..., ge=0.0, le=1.0)
+    demographics: dict = Field(default_factory=dict)
+    income_level: str = "mid"
+    location: str = Field(
+        default="urban",
+        description="Geographic location type: urban, suburban, rural, mixed"
+    )
+    category_usage: str = "medium"
+    shopping_behavior: str = "smart_shopper"
+    core_traits: list[str] = Field(default_factory=list)
+    pain_points: list[str] = Field(default_factory=list)
+    decision_drivers: list[str] = Field(default_factory=list)
+
+
 class SurveyWorkflow(BaseModel):
     """Survey workflow orchestration."""
 
     id: str
     product: Optional[ProductDescription] = None
     core_persona: Optional[CorePersona] = None
-    sample_size: Optional[int] = Field(None, ge=100, le=10000)
+    archetypes: List[ArchetypeSegment] = Field(
+        default_factory=list,
+        description="Multi-Archetype segments (v2.0). If empty, uses single core_persona.",
+    )
+    use_multi_archetype: bool = Field(
+        default=False,
+        description="Enable Multi-Archetype Stratified Sampling mode.",
+    )
+    currency: str = Field(
+        default="KRW",
+        description="Currency for income ranges (KRW or USD).",
+    )
+    sample_size: Optional[int] = Field(None, ge=10, le=10000)
     concepts: List[ConceptInput] = Field(
         default_factory=list,
         description="1-5 concepts to compare. If empty, product is used as single concept.",
@@ -119,7 +150,19 @@ class CorePersonaRequest(BaseModel):
 class SampleSizeRequest(BaseModel):
     """Request for sample size selection."""
 
-    sample_size: int = Field(..., ge=100, le=10000)
+    sample_size: int = Field(..., ge=10, le=10000)
+    use_multi_archetype: bool = Field(
+        default=False,
+        description="Enable Multi-Archetype Stratified Sampling mode.",
+    )
+    archetypes: Optional[List[dict]] = Field(
+        default=None,
+        description="Archetype segments for Multi-Archetype mode.",
+    )
+    enrich: bool = Field(
+        default=True,
+        description="Enable LLM enrichment for persona bios.",
+    )
 
 
 class ConceptsRequest(BaseModel):

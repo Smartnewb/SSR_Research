@@ -17,6 +17,36 @@ interface Workflow {
   core_persona?: any;
   sample_size?: number;
   concepts?: any[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+function formatDateTime(dateString?: string): string {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  const timeStr = date.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  if (diffDays === 0) {
+    return `오늘 ${timeStr}`;
+  } else if (diffDays === 1) {
+    return `어제 ${timeStr}`;
+  } else if (diffDays < 7) {
+    return `${diffDays}일 전`;
+  } else {
+    return date.toLocaleDateString("ko-KR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
 }
 
 export default function NewWorkflowPage() {
@@ -118,8 +148,15 @@ export default function NewWorkflowPage() {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <div className="font-semibold">
-                        {workflow.product?.name || "제품명 없음"}
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">
+                          {workflow.product?.name || "제품명 없음"}
+                        </span>
+                        {workflow.updated_at && (
+                          <span className="text-xs text-muted-foreground bg-gray-100 px-2 py-0.5 rounded">
+                            {formatDateTime(workflow.updated_at)}
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {workflow.product?.category || "카테고리 없음"}

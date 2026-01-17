@@ -1,21 +1,172 @@
-"""Research service for persona generation and concept building."""
+"""Research service for persona generation and concept building.
+
+Includes Multi-Archetype Stratified Sampling pipeline (v2.0):
+- Step 1: Segmentation - GPT-5.2 with high reasoning for market segmentation
+- Step 2: Distribution - Pure Python/NumPy for sample allocation
+- Step 3: Enrichment - GPT-5-mini with high verbosity for persona generation
+"""
 
 import json
-import os
 import re
 from typing import Optional
 
 from openai import OpenAI
 
+from ..core.config import settings
+
 
 def _get_research_model() -> str:
     """Get research model from environment or fallback."""
-    return os.getenv("RESEARCH_MODEL", "gpt-5.2")
+    return settings.research_model
 
 
 def _get_research_reasoning_effort() -> str:
     """Get research reasoning effort from environment or fallback."""
-    return os.getenv("RESEARCH_REASONING_EFFORT", "medium")
+    return settings.research_reasoning_effort
+
+
+def _get_segmentation_model() -> str:
+    """Get segmentation model (highest reasoning capability)."""
+    return settings.segmentation_model
+
+
+def _get_segmentation_reasoning_effort() -> str:
+    """Get segmentation reasoning effort (default: high for deep analysis)."""
+    return settings.segmentation_reasoning_effort
+
+
+SEGMENTATION_SYSTEM_PROMPT = """당신은 시장 분석 전문가입니다. 제공된 리서치 보고서를 심층 분석하여(Deep Reasoning), 이 시장의 잠재 고객을 **서로 다른 성향을 가진 3~5개 그룹(Segments)**으로 분류해 주세요.
+
+각 그룹의 **추정 시장 점유율(share_ratio)**을 합계 1.0이 되도록 설정해야 합니다.
+
+[분석 기준]
+1. Demographics (연령대, 성별 분포)
+2. Income Level (소득 수준, 가격 민감도)
+3. Location (거주 지역 유형)
+4. Category Usage (제품/서비스 사용 빈도)
+5. Shopping Behavior (구매 성향)
+6. Core Traits (핵심 특성, 동기, 가치관)
+
+[출력 형식]
+반드시 아래 JSON 스키마를 따르세요:
+
+```json
+[
+  {
+    "segment_name": "그룹명 (한글, 설명적)",
+    "share_ratio": 0.0~1.0,
+    "demographics": {
+      "age_range": [min, max],
+      "gender_distribution": {"female": %, "male": %}
+    },
+    "income_level": "none|low|mid|high",
+    "location": "urban|suburban|rural|mixed",
+    "category_usage": "high|medium|low",
+    "shopping_behavior": "impulsive|budget|quality|smart_shopper|price_sensitive",
+    "core_traits": ["특성1", "특성2", ...],
+    "pain_points": ["고민1", "고민2", ...],
+    "decision_drivers": ["결정요인1", "결정요인2", ...]
+  }
+]
+```
+
+[중요]
+- share_ratio 합계는 정확히 1.0이어야 합니다
+- 각 그룹은 서로 명확히 구분되는 특성을 가져야 합니다
+- 실제 시장 데이터에 기반한 현실적인 비율을 추정하세요"""
+
+
+async def segment_market_from_report(
+    research_report: str,
+    product_category: Optional[str] = None,
+    target_segments: int = 4,
+) -> dict:
+    """
+    Step 1: Segmentation - GPT-5.2 고추론 모드로 시장 세분화.
+
+    Gemini Deep Research 보고서를 분석하여 3~5개의 핵심 타겟 그룹(Archetype)과
+    점유율을 도출합니다.
+
+    Args:
+        research_report: Gemini Deep Research에서 생성된 보고서 텍스트
+        product_category: 제품/서비스 카테고리 (컨텍스트 제공용)
+        target_segments: 목표 세그먼트 수 (3~5, 기본값 4)
+
+    Returns:
+        dict containing:
+        - archetypes: List of segmented archetypes with share_ratio
+        - total_share: Should be 1.0
+        - warnings: Any normalization or inference warnings
+    """
+    client = OpenAI(api_key=settings.openai_api_key)
+
+    category_context = ""
+    if product_category:
+        category_context = f"\n[분석 대상 제품/서비스 카테고리]: {product_category}\n"
+
+    user_prompt = f"""다음 리서치 보고서를 분석하여 {target_segments}개의 고객 세그먼트로 분류해주세요.
+{category_context}
+[리서치 보고서]
+{research_report}
+
+JSON 배열만 출력하세요. 마크다운 코드 블록이나 설명 없이 순수 JSON만 반환하세요."""
+
+    full_input = f"{SEGMENTATION_SYSTEM_PROMPT}\n\n{user_prompt}"
+
+    model = _get_segmentation_model()
+    reasoning_effort = _get_segmentation_reasoning_effort()
+    print(f"[segment_market] Using model: {model}, reasoning_effort: {reasoning_effort}")
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=full_input,
+            max_output_tokens=3000,
+            reasoning={"effort": reasoning_effort},
+            text={"verbosity": "medium"},
+        )
+    except Exception as api_error:
+        print(f"[segment_market] OpenAI API Error: {type(api_error).__name__}: {api_error}")
+        raise
+
+    content = response.output_text
+    warnings = []
+
+    try:
+        archetypes = json.loads(content)
+    except json.JSONDecodeError:
+        json_match = re.search(r'\[[\s\S]*\]', content)
+        if json_match:
+            archetypes = json.loads(json_match.group())
+        else:
+            raise ValueError("Failed to parse archetypes JSON from response")
+
+    total_share = sum(arch.get("share_ratio", 0) for arch in archetypes)
+
+    if abs(total_share - 1.0) > 0.01:
+        warnings.append(f"share_ratio 합계가 {total_share:.2f}였습니다. 1.0으로 정규화합니다.")
+        for arch in archetypes:
+            arch["share_ratio"] = arch.get("share_ratio", 0) / total_share
+
+    for i, arch in enumerate(archetypes):
+        if "segment_id" not in arch:
+            arch["segment_id"] = f"SEGMENT_{i+1:02d}"
+
+        gender = arch.get("demographics", {}).get("gender_distribution", {"female": 50, "male": 50})
+        total_gender = gender.get("female", 50) + gender.get("male", 50)
+        if total_gender != 100:
+            arch["demographics"]["gender_distribution"] = {
+                "female": round(gender.get("female", 50) * 100 / total_gender),
+                "male": 100 - round(gender.get("female", 50) * 100 / total_gender)
+            }
+            warnings.append(f"{arch['segment_name']}: 성별 분포 정규화됨")
+
+    return {
+        "archetypes": archetypes,
+        "total_share": 1.0,
+        "segment_count": len(archetypes),
+        "warnings": warnings,
+    }
 
 
 RESEARCH_PROMPT_SYSTEM = """You are a market research expert specializing in consumer insights.
@@ -65,7 +216,7 @@ async def generate_research_prompt(
 
     Uses Responses API for improved CoT handling and cache efficiency.
     """
-    client = OpenAI()
+    client = OpenAI(api_key=settings.openai_api_key)
 
     market_context = {
         "korea": "Korean market, provide Korean consumer insights",
@@ -122,7 +273,7 @@ async def parse_research_report(research_report: str) -> dict:
 
     Uses Responses API for improved CoT handling and cache efficiency.
     """
-    client = OpenAI()
+    client = OpenAI(api_key=settings.openai_api_key)
 
     full_input = f"""{PARSE_REPORT_SYSTEM}
 

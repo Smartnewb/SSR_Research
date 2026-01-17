@@ -12,6 +12,7 @@ from ..models.workflow import (
     WorkflowStatus,
     ProductDescription,
     CorePersona,
+    ArchetypeSegment,
 )
 from ..models.comparison import ConceptInput
 
@@ -60,6 +61,24 @@ def init_database():
         # Migration: Add concepts_json column if it doesn't exist
         try:
             conn.execute("ALTER TABLE workflows ADD COLUMN concepts_json TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: Add archetypes_json column if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE workflows ADD COLUMN archetypes_json TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: Add use_multi_archetype column if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE workflows ADD COLUMN use_multi_archetype INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: Add currency column if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE workflows ADD COLUMN currency TEXT DEFAULT 'KRW'")
         except sqlite3.OperationalError:
             pass  # Column already exists
 
@@ -119,6 +138,39 @@ def init_database():
             )
         """)
 
+        # QIE (Qualitative Insight Engine) tables
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS qie_jobs (
+                job_id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL,
+                current_stage TEXT,
+                message TEXT,
+                total_responses INTEGER NOT NULL,
+                processed_count INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                error TEXT,
+                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS qie_results (
+                job_id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                tier1_results_json TEXT NOT NULL,
+                aggregated_stats_json TEXT NOT NULL,
+                analysis_json TEXT NOT NULL,
+                execution_time REAL NOT NULL,
+                tier1_time REAL NOT NULL,
+                tier2_time REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
+            )
+        """)
+
 
 def _datetime_to_str(dt: Optional[datetime]) -> Optional[str]:
     """Convert datetime to ISO string."""
@@ -136,13 +188,15 @@ def save_workflow(workflow: SurveyWorkflow):
         product_json = workflow.product.model_dump_json() if workflow.product else None
         persona_json = workflow.core_persona.model_dump_json() if workflow.core_persona else None
         concepts_json = json.dumps([c.model_dump() for c in workflow.concepts]) if workflow.concepts else None
+        archetypes_json = json.dumps([a.model_dump() for a in workflow.archetypes]) if workflow.archetypes else None
 
         conn.execute("""
             INSERT OR REPLACE INTO workflows (
                 id, status, current_step, product_json, core_persona_json,
-                concepts_json, sample_size, persona_generation_job_id, survey_execution_job_id,
+                concepts_json, archetypes_json, use_multi_archetype, currency,
+                sample_size, persona_generation_job_id, survey_execution_job_id,
                 error_message, created_at, updated_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             workflow.id,
             workflow.status.value,
@@ -150,6 +204,9 @@ def save_workflow(workflow: SurveyWorkflow):
             product_json,
             persona_json,
             concepts_json,
+            archetypes_json,
+            1 if workflow.use_multi_archetype else 0,
+            workflow.currency,
             workflow.sample_size,
             workflow.persona_generation_job_id,
             workflow.survey_execution_job_id,
@@ -185,6 +242,15 @@ def load_workflow(workflow_id: str) -> Optional[SurveyWorkflow]:
             concepts_data = json.loads(concepts_json_value)
             concepts = [ConceptInput.model_validate(c) for c in concepts_data]
 
+        archetypes = []
+        archetypes_json_value = row["archetypes_json"] if "archetypes_json" in row.keys() else None
+        if archetypes_json_value:
+            archetypes_data = json.loads(archetypes_json_value)
+            archetypes = [ArchetypeSegment.model_validate(a) for a in archetypes_data]
+
+        use_multi_archetype = bool(row["use_multi_archetype"]) if "use_multi_archetype" in row.keys() else False
+        currency = row["currency"] if "currency" in row.keys() and row["currency"] else "KRW"
+
         return SurveyWorkflow(
             id=row["id"],
             status=WorkflowStatus(row["status"]),
@@ -192,6 +258,9 @@ def load_workflow(workflow_id: str) -> Optional[SurveyWorkflow]:
             product=product,
             core_persona=core_persona,
             concepts=concepts,
+            archetypes=archetypes,
+            use_multi_archetype=use_multi_archetype,
+            currency=currency,
             sample_size=row["sample_size"],
             persona_generation_job_id=row["persona_generation_job_id"],
             survey_execution_job_id=row["survey_execution_job_id"],
@@ -385,6 +454,228 @@ def load_execution_result(job_id: str) -> Optional[dict]:
             "std_dev": row["std_dev"],
             "score_distribution": json.loads(row["score_distribution_json"]),
             "results": json.loads(row["results_json"]),
+        }
+
+
+# QIE (Qualitative Insight Engine) database functions
+
+def save_qie_job(
+    job_id: str,
+    workflow_id: str,
+    status: str,
+    progress: float,
+    total_responses: int,
+    processed_count: int,
+    started_at: datetime,
+    current_stage: str = "",
+    message: str = "",
+    completed_at: Optional[datetime] = None,
+    error: Optional[str] = None,
+):
+    """Save QIE job status to database."""
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO qie_jobs (
+                job_id, workflow_id, status, progress, current_stage, message,
+                total_responses, processed_count, started_at, completed_at, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                job_id,
+                workflow_id,
+                status,
+                progress,
+                current_stage,
+                message,
+                total_responses,
+                processed_count,
+                _datetime_to_str(started_at),
+                _datetime_to_str(completed_at),
+                error,
+            ),
+        )
+
+
+def load_qie_job(job_id: str) -> Optional[dict]:
+    """Load QIE job from database."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM qie_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "job_id": row["job_id"],
+            "workflow_id": row["workflow_id"],
+            "status": row["status"],
+            "progress": row["progress"],
+            "current_stage": row["current_stage"],
+            "message": row["message"],
+            "total_responses": row["total_responses"],
+            "processed_count": row["processed_count"],
+            "started_at": _str_to_datetime(row["started_at"]),
+            "completed_at": _str_to_datetime(row["completed_at"]),
+            "error": row["error"],
+        }
+
+
+def load_qie_job_by_workflow(workflow_id: str) -> Optional[dict]:
+    """Load most recent QIE job for a workflow."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM qie_jobs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 1",
+            (workflow_id,),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "job_id": row["job_id"],
+            "workflow_id": row["workflow_id"],
+            "status": row["status"],
+            "progress": row["progress"],
+            "current_stage": row["current_stage"],
+            "message": row["message"],
+            "total_responses": row["total_responses"],
+            "processed_count": row["processed_count"],
+            "started_at": _str_to_datetime(row["started_at"]),
+            "completed_at": _str_to_datetime(row["completed_at"]),
+            "error": row["error"],
+        }
+
+
+def update_qie_job_progress(
+    job_id: str,
+    status: str,
+    progress: float,
+    processed_count: int,
+    current_stage: str = "",
+    message: str = "",
+    completed_at: Optional[datetime] = None,
+    error: Optional[str] = None,
+):
+    """Update QIE job progress without overwriting started_at."""
+    with get_connection() as conn:
+        if completed_at:
+            conn.execute(
+                """
+                UPDATE qie_jobs SET
+                    status = ?, progress = ?, processed_count = ?,
+                    current_stage = ?, message = ?, completed_at = ?, error = ?
+                WHERE job_id = ?
+            """,
+                (
+                    status,
+                    progress,
+                    processed_count,
+                    current_stage,
+                    message,
+                    _datetime_to_str(completed_at),
+                    error,
+                    job_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE qie_jobs SET
+                    status = ?, progress = ?, processed_count = ?,
+                    current_stage = ?, message = ?, error = ?
+                WHERE job_id = ?
+            """,
+                (
+                    status,
+                    progress,
+                    processed_count,
+                    current_stage,
+                    message,
+                    error,
+                    job_id,
+                ),
+            )
+
+
+def save_qie_result(
+    job_id: str,
+    workflow_id: str,
+    tier1_results: list[dict],
+    aggregated_stats: dict,
+    analysis: dict,
+    execution_time: float,
+    tier1_time: float,
+    tier2_time: float,
+):
+    """Save QIE result to database."""
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO qie_results (
+                job_id, workflow_id, tier1_results_json, aggregated_stats_json,
+                analysis_json, execution_time, tier1_time, tier2_time, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                job_id,
+                workflow_id,
+                json.dumps(tier1_results),
+                json.dumps(aggregated_stats),
+                json.dumps(analysis),
+                execution_time,
+                tier1_time,
+                tier2_time,
+                _datetime_to_str(datetime.now()),
+            ),
+        )
+
+
+def load_qie_result(job_id: str) -> Optional[dict]:
+    """Load QIE result from database."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM qie_results WHERE job_id = ?", (job_id,)
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "job_id": row["job_id"],
+            "workflow_id": row["workflow_id"],
+            "tier1_results": json.loads(row["tier1_results_json"]),
+            "aggregated_stats": json.loads(row["aggregated_stats_json"]),
+            "analysis": json.loads(row["analysis_json"]),
+            "execution_time": row["execution_time"],
+            "tier1_time": row["tier1_time"],
+            "tier2_time": row["tier2_time"],
+            "created_at": _str_to_datetime(row["created_at"]),
+        }
+
+
+def load_qie_result_by_workflow(workflow_id: str) -> Optional[dict]:
+    """Load most recent QIE result for a workflow."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM qie_results WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 1",
+            (workflow_id,),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "job_id": row["job_id"],
+            "workflow_id": row["workflow_id"],
+            "tier1_results": json.loads(row["tier1_results_json"]),
+            "aggregated_stats": json.loads(row["aggregated_stats_json"]),
+            "analysis": json.loads(row["analysis_json"]),
+            "execution_time": row["execution_time"],
+            "tier1_time": row["tier1_time"],
+            "tier2_time": row["tier2_time"],
+            "created_at": _str_to_datetime(row["created_at"]),
         }
 
 
