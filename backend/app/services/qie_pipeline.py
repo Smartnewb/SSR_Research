@@ -15,6 +15,7 @@ from typing import Callable, Optional
 import openai
 
 from ..core.config import settings
+from .narrative_generator import NarrativeGenerator
 from ..models.qie import (
     ActionItem,
     ActionPriority,
@@ -152,6 +153,28 @@ class QIEPipeline:
         )
         tier2_time = time.time() - tier2_start
 
+        # Tier 3: Narrative Report Generation
+        await self._update_progress(
+            "report_generation", 0.85, "인사이트 보고서 생성 중..."
+        )
+        report_start = time.time()
+
+        narrative_gen = NarrativeGenerator(progress_callback=self.progress_callback)
+
+        # Compute demographics summary
+        demographics_summary = self._compute_demographics_summary(responses)
+
+        report_result = await narrative_gen.generate_report(
+            concept_id=product_description[:20],
+            concept_name=product_description[:50],
+            product_description=product_description,
+            aggregated_stats=aggregated_stats_to_dict(aggregated_stats),
+            qie_analysis=qie_analysis_to_dict(analysis),
+            original_responses=responses,
+            demographics_summary=demographics_summary,
+        )
+
+        report_time = time.time() - report_start
         total_time = time.time() - total_start
 
         await self._update_progress(
@@ -162,9 +185,10 @@ class QIEPipeline:
             "total_time": total_time,
             "tier1_time": tier1_time,
             "tier2_time": tier2_time,
+            "report_time": report_time,
         }
 
-        return tier1_results, aggregated_stats, analysis, timing_info
+        return tier1_results, aggregated_stats, analysis, timing_info, report_result.get("report_data")
 
     async def run_tier1_batch(
         self, responses: list[dict]
@@ -441,6 +465,32 @@ Extract sentiment, category, and keywords as JSON."""
                 }
 
         return result
+
+    def _compute_demographics_summary(self, responses: list[dict]) -> dict:
+        """Compute demographics summary from responses."""
+        if not responses:
+            return {"summary": "데이터 없음"}
+
+        ages = [r.get("demographics", {}).get("age", 0) for r in responses]
+        genders = [r.get("demographics", {}).get("gender", "") for r in responses]
+        incomes = [r.get("demographics", {}).get("income", "") for r in responses]
+
+        avg_age = sum(ages) / len(ages) if ages else 0
+        gender_counts: dict[str, int] = {}
+        for g in genders:
+            if g:
+                gender_counts[g] = gender_counts.get(g, 0) + 1
+
+        most_common_gender = max(gender_counts, key=gender_counts.get) if gender_counts else ""
+        income_counts: dict[str, int] = {}
+        for i in incomes:
+            if i:
+                income_counts[i] = income_counts.get(i, 0) + 1
+        most_common_income = max(income_counts, key=income_counts.get) if income_counts else ""
+
+        summary = f"평균 {avg_age:.0f}세, {most_common_gender} 비중 높음, {most_common_income} 소득 수준"
+
+        return {"summary": summary}
 
     async def run_tier2_synthesis(
         self,
