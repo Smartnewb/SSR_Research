@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .comparison import ConceptInput
 
@@ -123,6 +123,13 @@ class ProductDescriptionRequest(BaseModel):
     features: list[str] = Field(default_factory=list)
     price_point: Optional[str] = Field(None, max_length=100)
     target_market: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("price_point", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "":
+            return None
+        return v
 
 
 class ProductDescriptionAssistRequest(BaseModel):

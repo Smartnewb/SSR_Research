@@ -25,6 +25,10 @@ from ..services.product import (
 from ..services.persona_generation import (
     generate_enriched_personas_from_archetypes,
 )
+from ..services.concept_generator import (
+    generate_concept_from_product,
+    generate_concept_from_product_mock,
+)
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -392,11 +396,22 @@ async def update_concepts(workflow_id: str, request: ConceptsRequest):
 
 
 @router.post("/{workflow_id}/concepts/from-product", response_model=SurveyWorkflow)
-async def create_concept_from_product(workflow_id: str):
-    """Create initial concept from product description.
+async def create_concept_from_product_endpoint(
+    workflow_id: str,
+    use_mock: bool = Query(False, description="Use mock LLM for testing"),
+):
+    """Create initial concept from product description using LLM.
 
-    Converts the product from Step 1 into a concept for Step 6.
+    Transforms the raw product from Step 1 into a persuasive Concept Board
+    following standard marketing research structure (5 Parts):
+    1. Headline: Eye-catching one-liner
+    2. Consumer Insight: Pain point/need (empathy)
+    3. Benefits: Value propositions (list)
+    4. RTB: Reasons to Believe (list)
+    5. Image Prompt: Visual representation description
+
     This is called automatically when entering the concepts step.
+    The LLM performs creative writing to make the concept compelling.
     """
     service = get_workflow_service()
 
@@ -408,18 +423,16 @@ async def create_concept_from_product(workflow_id: str):
         if not workflow.product:
             raise HTTPException(status_code=400, detail="Product description not found")
 
-        # Convert product to concept if no concepts exist
+        # Generate concept from product using LLM if no concepts exist
         if not workflow.concepts:
-            concept = ConceptInput(
-                id="CONCEPT_001",
-                title=workflow.product.name,
-                headline=workflow.product.description[:200] if len(workflow.product.description) > 200 else workflow.product.description,
-                consumer_insight=f"Target market: {workflow.product.target_market}",
-                benefit=", ".join(workflow.product.features[:3]) if workflow.product.features else "Key benefits",
-                rtb=f"Category: {workflow.product.category}",
-                image_description=f"Visual representation of {workflow.product.name}",
-                price=workflow.product.price_point or "Contact for pricing",
-            )
+            if use_mock:
+                concept = await generate_concept_from_product_mock(
+                    workflow.product, concept_id="CONCEPT_001"
+                )
+            else:
+                concept = await generate_concept_from_product(
+                    workflow.product, concept_id="CONCEPT_001"
+                )
             workflow = service.update_concepts(workflow_id, [concept])
 
         return workflow

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Trash2, Play, ArrowLeft, Package, FlaskConical, BarChart3 } from "lucide-react";
+import { Plus, Trash2, Play, ArrowLeft, Package, FlaskConical } from "lucide-react";
 import type { ConceptInput } from "@/lib/types";
 
 interface Workflow {
@@ -32,9 +32,9 @@ const emptyConceptTemplate = (id: string): ConceptInput => ({
   title: "",
   headline: "",
   consumer_insight: "",
-  benefit: "",
-  rtb: "",
-  image_description: "",
+  benefits: [""],
+  rtb: [""],
+  image_prompt: "",
   price: "",
 });
 
@@ -123,12 +123,53 @@ export default function ConceptsManagementPage() {
 
   const validateConcepts = () => {
     for (const concept of concepts) {
-      if (!concept.title || !concept.headline || !concept.benefit || !concept.price) {
-        toast.error("모든 컨셉의 필수 필드(제목, 헤드라인, 혜택, 가격)를 입력해주세요");
+      if (!concept.title || !concept.headline || !concept.price) {
+        toast.error("모든 컨셉의 필수 필드(제목, 헤드라인, 가격)를 입력해주세요");
+        return false;
+      }
+      if (!concept.benefits || concept.benefits.filter(b => b.trim()).length === 0) {
+        toast.error("최소 1개의 혜택을 입력해주세요");
         return false;
       }
     }
     return true;
+  };
+
+  const updateListField = (
+    conceptIndex: number,
+    field: "benefits" | "rtb",
+    itemIndex: number,
+    value: string
+  ) => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    list[itemIndex] = value;
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
+  };
+
+  const addListItem = (conceptIndex: number, field: "benefits" | "rtb") => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    if (list.length >= 5) {
+      toast.error("최대 5개까지 추가할 수 있습니다");
+      return;
+    }
+    list.push("");
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
+  };
+
+  const removeListItem = (conceptIndex: number, field: "benefits" | "rtb", itemIndex: number) => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    if (list.length <= 1) {
+      toast.error("최소 1개는 필요합니다");
+      return;
+    }
+    list.splice(itemIndex, 1);
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
   };
 
   const saveConcepts = async () => {
@@ -321,34 +362,88 @@ export default function ConceptsManagementPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>
-                  핵심 혜택 <span className="text-destructive">*</span>
-                </Label>
-                <Textarea
-                  value={concept.benefit}
-                  onChange={(e) => updateConcept(index, "benefit", e.target.value)}
-                  placeholder="예: 임상 검증된 미백 효과를 집에서 편하게"
-                  rows={2}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>
+                    핵심 혜택 <span className="text-destructive">*</span>
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addListItem(index, "benefits")}
+                    disabled={(concept.benefits?.length || 0) >= 5}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    추가
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {(concept.benefits || [""]).map((benefit, bIndex) => (
+                    <div key={bIndex} className="flex gap-2">
+                      <Input
+                        value={benefit}
+                        onChange={(e) => updateListField(index, "benefits", bIndex, e.target.value)}
+                        placeholder={`혜택 ${bIndex + 1}: 예) 집에서 편하게 전문가급 미백 효과를`}
+                      />
+                      {(concept.benefits?.length || 0) > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeListItem(index, "benefits", bIndex)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>신뢰 근거 (RTB)</Label>
-                <Textarea
-                  value={concept.rtb}
-                  onChange={(e) => updateConcept(index, "rtb", e.target.value)}
-                  placeholder="예: 과산화수소 3% + 폴리싱 실리카 이중 작용"
-                  rows={2}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>신뢰 근거 (RTB)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addListItem(index, "rtb")}
+                    disabled={(concept.rtb?.length || 0) >= 5}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    추가
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {(concept.rtb || [""]).map((rtbItem, rIndex) => (
+                    <div key={rIndex} className="flex gap-2">
+                      <Input
+                        value={rtbItem}
+                        onChange={(e) => updateListField(index, "rtb", rIndex, e.target.value)}
+                        placeholder={`RTB ${rIndex + 1}: 예) 특허 받은 과산화수소 3% 포뮬러`}
+                      />
+                      {(concept.rtb?.length || 0) > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeListItem(index, "rtb", rIndex)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>이미지 설명</Label>
+                <Label>이미지 프롬프트</Label>
                 <Textarea
-                  value={concept.image_description}
-                  onChange={(e) => updateConcept(index, "image_description", e.target.value)}
-                  placeholder="예: 빨간 광택 튜브, 하얀 치아 로고"
-                  rows={2}
+                  value={concept.image_prompt}
+                  onChange={(e) => updateConcept(index, "image_prompt", e.target.value)}
+                  placeholder="예: A sleek red toothpaste tube on marble counter, soft morning light, minimalist style, high-end product photography"
+                  rows={3}
                 />
               </div>
             </CardContent>

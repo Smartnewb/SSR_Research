@@ -5,16 +5,47 @@ from pydantic import BaseModel, Field
 
 
 class ConceptInput(BaseModel):
-    """Single concept for comparison."""
+    """Single concept for comparison (Concept Board format).
+
+    Follows standard marketing research concept testing structure:
+    1. Headline: Eye-catching one-liner
+    2. Consumer Insight: Pain point/need (empathy)
+    3. Benefits: Value propositions (list)
+    4. RTB: Reasons to Believe (list)
+    5. Image Prompt: Visual representation description
+    """
 
     id: str = Field(..., description="Unique concept identifier")
-    title: str = Field(..., min_length=1, max_length=100)
-    headline: str = Field(..., min_length=1, max_length=200)
-    consumer_insight: str = Field(..., min_length=10)
-    benefit: str = Field(..., min_length=10)
-    rtb: str = Field(..., min_length=10, description="Reason to Believe")
-    image_description: str = Field(..., min_length=10)
-    price: str = Field(..., min_length=1, max_length=100)
+    title: str = Field(..., min_length=1, max_length=100, description="Product name")
+    headline: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Eye-catching one-liner (e.g., '3일 만에 2단계 더 밝은 미소')",
+    )
+    consumer_insight: str = Field(
+        ...,
+        min_length=10,
+        description="Consumer pain point starting with empathy (e.g., '커피로 누렇게 변한 치아 때문에...')",
+    )
+    benefits: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description="3-5 value propositions focusing on benefits, not features",
+    )
+    rtb: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description="Reasons to Believe - technical proof, certifications, data",
+    )
+    image_prompt: str = Field(
+        ...,
+        min_length=10,
+        description="Detailed prompt for image generation (DALL-E style)",
+    )
+    price: str = Field(..., min_length=1, max_length=100, description="Price with unit")
 
 
 class MultiCompareRequest(BaseModel):

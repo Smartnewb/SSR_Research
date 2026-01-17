@@ -22,9 +22,9 @@ export default function MultiComparePage() {
       title: "",
       headline: "",
       consumer_insight: "",
-      benefit: "",
-      rtb: "",
-      image_description: "",
+      benefits: [""],
+      rtb: [""],
+      image_prompt: "",
       price: "",
     },
     {
@@ -32,9 +32,9 @@ export default function MultiComparePage() {
       title: "",
       headline: "",
       consumer_insight: "",
-      benefit: "",
-      rtb: "",
-      image_description: "",
+      benefits: [""],
+      rtb: [""],
+      image_prompt: "",
       price: "",
     },
   ]);
@@ -82,9 +82,9 @@ export default function MultiComparePage() {
         title: "",
         headline: "",
         consumer_insight: "",
-        benefit: "",
-        rtb: "",
-        image_description: "",
+        benefits: [""],
+        rtb: [""],
+        image_prompt: "",
         price: "",
       },
     ]);
@@ -107,12 +107,50 @@ export default function MultiComparePage() {
   const validateConcepts = () => {
     for (const concept of concepts) {
       if (!concept.title || !concept.headline || !concept.consumer_insight ||
-          !concept.benefit || !concept.rtb || !concept.image_description || !concept.price) {
+          !concept.benefits?.some(b => b.trim()) || !concept.rtb?.some(r => r.trim()) ||
+          !concept.image_prompt || !concept.price) {
         toast.error("Please fill all fields for all concepts");
         return false;
       }
     }
     return true;
+  };
+
+  const updateListField = (
+    conceptIndex: number,
+    field: "benefits" | "rtb",
+    itemIndex: number,
+    value: string
+  ) => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    list[itemIndex] = value;
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
+  };
+
+  const addListItem = (conceptIndex: number, field: "benefits" | "rtb") => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    if (list.length >= 5) {
+      toast.error("Maximum 5 items allowed");
+      return;
+    }
+    list.push("");
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
+  };
+
+  const removeListItem = (conceptIndex: number, field: "benefits" | "rtb", itemIndex: number) => {
+    const updated = [...concepts];
+    const list = [...(updated[conceptIndex][field] || [])];
+    if (list.length <= 1) {
+      toast.error("At least 1 item required");
+      return;
+    }
+    list.splice(itemIndex, 1);
+    updated[conceptIndex] = { ...updated[conceptIndex], [field]: list };
+    setConcepts(updated);
   };
 
   const handleSubmit = async () => {
@@ -470,31 +508,85 @@ export default function MultiComparePage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Key Benefit</Label>
-                <Textarea
-                  value={concept.benefit}
-                  onChange={(e) => updateConcept(index, "benefit", e.target.value)}
-                  placeholder="e.g., 임상 검증된 미백 효과를 집에서 편하게"
-                  rows={2}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>Key Benefits</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addListItem(index, "benefits")}
+                    disabled={(concept.benefits?.length || 0) >= 5}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {(concept.benefits || [""]).map((benefit, bIndex) => (
+                    <div key={bIndex} className="flex gap-2">
+                      <Input
+                        value={benefit}
+                        onChange={(e) => updateListField(index, "benefits", bIndex, e.target.value)}
+                        placeholder={`Benefit ${bIndex + 1}`}
+                      />
+                      {(concept.benefits?.length || 0) > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeListItem(index, "benefits", bIndex)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>Reason to Believe (RTB)</Label>
-                <Textarea
-                  value={concept.rtb}
-                  onChange={(e) => updateConcept(index, "rtb", e.target.value)}
-                  placeholder="e.g., 과산화수소 3% + 폴리싱 실리카 이중 작용"
-                  rows={2}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>Reason to Believe (RTB)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addListItem(index, "rtb")}
+                    disabled={(concept.rtb?.length || 0) >= 5}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {(concept.rtb || [""]).map((rtbItem, rIndex) => (
+                    <div key={rIndex} className="flex gap-2">
+                      <Input
+                        value={rtbItem}
+                        onChange={(e) => updateListField(index, "rtb", rIndex, e.target.value)}
+                        placeholder={`RTB ${rIndex + 1}`}
+                      />
+                      {(concept.rtb?.length || 0) > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeListItem(index, "rtb", rIndex)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>Image Description</Label>
+                <Label>Image Prompt</Label>
                 <Textarea
-                  value={concept.image_description}
-                  onChange={(e) => updateConcept(index, "image_description", e.target.value)}
-                  placeholder="e.g., 빨간 광택 튜브, 하얀 치아 로고"
+                  value={concept.image_prompt}
+                  onChange={(e) => updateConcept(index, "image_prompt", e.target.value)}
+                  placeholder="e.g., A sleek product on marble counter, soft lighting, high-end photography"
                   rows={2}
                 />
               </div>
