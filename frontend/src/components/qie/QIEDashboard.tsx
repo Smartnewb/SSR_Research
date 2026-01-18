@@ -11,6 +11,7 @@ import { ExecutiveSummary } from "./ExecutiveSummary";
 import { KeyDriversChart } from "./KeyDriversChart";
 import { PainPointRadar } from "./PainPointRadar";
 import { ActionItemsList } from "./ActionItemsList";
+import { InsightReport } from "@/components/report";
 import type { QIEResultResponse, QIEJobResponse, QIEJobStatus } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -337,7 +338,49 @@ export function QIEDashboard({ workflowId }: QIEDashboardProps) {
     );
   }
 
-  // Display results
+  // Display results - use InsightReport if report_data is available
+  if (result.report_data) {
+    return (
+      <div className="space-y-6">
+        {/* Header with timing info */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Brain className="h-5 w-5 text-purple-500" />
+            <h2 className="text-lg font-semibold">AI 심층 분석 결과</h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-muted-foreground">
+              <span>총 {result.execution_time.toFixed(1)}초</span>
+              <span className="mx-2">|</span>
+              <span>Tier1: {result.tier1_time.toFixed(1)}초</span>
+              <span className="mx-2">|</span>
+              <span>Tier2: {result.tier2_time.toFixed(1)}초</span>
+              {result.report_generation_time && (
+                <>
+                  <span className="mx-2">|</span>
+                  <span>보고서: {result.report_generation_time.toFixed(1)}초</span>
+                </>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => startAnalysis(true)}
+              disabled={isStarting}
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${isStarting ? "animate-spin" : ""}`} />
+              재분석
+            </Button>
+          </div>
+        </div>
+
+        {/* InsightReport Component */}
+        <InsightReport data={result.report_data} />
+      </div>
+    );
+  }
+
+  // Fallback to old display if no report_data (backward compatibility)
   return (
     <div className="space-y-6">
       {/* Header with timing info */}
