@@ -13,6 +13,7 @@ from typing import Optional
 from openai import OpenAI
 
 from ..core.config import settings
+from .llm_utils import normalize_reasoning_effort
 
 
 def _get_research_model() -> str:
@@ -118,13 +119,17 @@ JSON 배열만 출력하세요. 마크다운 코드 블록이나 설명 없이 �
     print(f"[segment_market] Using model: {model}, reasoning_effort: {reasoning_effort}")
 
     try:
-        response = client.responses.create(
-            model=model,
-            input=full_input,
-            max_output_tokens=3000,
-            reasoning={"effort": reasoning_effort},
-            text={"verbosity": "medium"},
-        )
+        normalized_effort = normalize_reasoning_effort(model, reasoning_effort)
+        create_params = {
+            "model": model,
+            "input": full_input,
+            "max_output_tokens": 3000,
+            "text": {"verbosity": "medium"},
+        }
+        if normalized_effort:
+            create_params["reasoning"] = {"effort": normalized_effort}
+
+        response = client.responses.create(**create_params)
     except Exception as api_error:
         print(f"[segment_market] OpenAI API Error: {type(api_error).__name__}: {api_error}")
         raise
@@ -246,13 +251,18 @@ Make the prompt comprehensive enough to gather quantitative data where possible.
 
 {user_prompt}"""
 
-    response = client.responses.create(
-        model=_get_research_model(),
-        input=full_input,
-        max_output_tokens=1500,
-        reasoning={"effort": _get_research_reasoning_effort()},
-        text={"verbosity": "medium"},
-    )
+    model = _get_research_model()
+    normalized_effort = normalize_reasoning_effort(model, _get_research_reasoning_effort())
+    create_params = {
+        "model": model,
+        "input": full_input,
+        "max_output_tokens": 1500,
+        "text": {"verbosity": "medium"},
+    }
+    if normalized_effort:
+        create_params["reasoning"] = {"effort": normalized_effort}
+
+    response = client.responses.create(**create_params)
 
     research_prompt = response.output_text
 
@@ -281,13 +291,18 @@ Parse this research report:
 
 {research_report}"""
 
-    response = client.responses.create(
-        model=_get_research_model(),
-        input=full_input,
-        max_output_tokens=2000,
-        reasoning={"effort": "low"},
-        text={"verbosity": "low", "format": {"type": "json_object"}},
-    )
+    model = _get_research_model()
+    normalized_effort = normalize_reasoning_effort(model, "low")
+    create_params = {
+        "model": model,
+        "input": full_input,
+        "max_output_tokens": 2000,
+        "text": {"verbosity": "low", "format": {"type": "json_object"}},
+    }
+    if normalized_effort:
+        create_params["reasoning"] = {"effort": normalized_effort}
+
+    response = client.responses.create(**create_params)
 
     content = response.output_text
 

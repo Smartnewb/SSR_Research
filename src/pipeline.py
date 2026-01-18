@@ -1,6 +1,8 @@
 """Main pipeline orchestrating all components."""
 
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
 import numpy as np
@@ -10,6 +12,16 @@ from tqdm import tqdm
 def _get_default_llm_model() -> str:
     """Get default LLM model from environment or fallback."""
     return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
+
+def _get_default_concurrency() -> int:
+    """Get default survey concurrency from environment or fallback."""
+    env_value = os.getenv("SURVEY_CONCURRENCY")
+    if env_value:
+        try:
+            return max(1, int(env_value))
+        except ValueError:
+            return 1
+    return 8
 
 from .personas.generator import (
     Persona,
@@ -116,6 +128,7 @@ class SSRPipeline:
         use_stratified: bool = True,
         show_progress: bool = True,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        max_concurrency: Optional[int] = None,
     ) -> AggregatedResults:
         """
         Run full survey pipeline.
@@ -127,6 +140,7 @@ class SSRPipeline:
             use_stratified: Whether to use stratified sampling
             show_progress: Whether to display progress bar
             progress_callback: Optional callback for custom progress handling
+            max_concurrency: Max parallel LLM calls (default from SURVEY_CONCURRENCY or 8)
 
         Returns:
             Aggregated survey results
@@ -143,47 +157,116 @@ class SSRPipeline:
         else:
             personas = [generate_persona_hybrid() for _ in range(sample_size)]
 
-        results = []
-        response_texts = []
+        total_personas = len(personas)
+        resolved_concurrency = (
+            max_concurrency if max_concurrency is not None else _get_default_concurrency()
+        )
+        if resolved_concurrency < 1:
+            resolved_concurrency = 1
+        resolved_concurrency = min(resolved_concurrency, total_personas)
 
-        persona_iter = tqdm(
-            personas,
+        results: list[SurveyResult] = []
+
+        progress_bar = tqdm(
+            total=total_personas,
             desc="Surveying personas",
             disable=not show_progress,
             unit="persona",
         )
 
-        for i, persona in enumerate(persona_iter):
-            system_prompt = persona_to_system_prompt(persona)
+        if resolved_concurrency <= 1:
+            for i, persona in enumerate(personas):
+                system_prompt = persona_to_system_prompt(persona)
 
-            response = get_purchase_opinion_with_retry(
-                persona_system_prompt=system_prompt,
-                product_description=product_description,
-                model=self.llm_model,
-                client=self.client,
-            )
-
-            if response:
-                self.cost_tracker.record_call(
-                    self.llm_model,
-                    response.get("usage", {}),
-                    response["cost"],
+                response = get_purchase_opinion_with_retry(
+                    persona_system_prompt=system_prompt,
+                    product_description=product_description,
+                    model=self.llm_model,
+                    client=self.client,
                 )
 
-                result = SurveyResult(
-                    persona_id=persona.persona_id,
-                    response_text=response["response_text"],
-                    ssr_score=0.0,
-                    persona_data=persona.to_dict(),
-                    tokens_used=response["tokens_used"],
-                    cost=response["cost"],
-                    latency_ms=response["latency_ms"],
-                )
-                results.append(result)
-                response_texts.append(response["response_text"])
+                if response:
+                    self.cost_tracker.record_call(
+                        self.llm_model,
+                        response.get("usage", {}),
+                        response["cost"],
+                    )
 
-            if progress_callback:
-                progress_callback(i + 1, sample_size)
+                    result = SurveyResult(
+                        persona_id=persona.persona_id,
+                        response_text=response["response_text"],
+                        ssr_score=0.0,
+                        persona_data=persona.to_dict(),
+                        tokens_used=response["tokens_used"],
+                        cost=response["cost"],
+                        latency_ms=response["latency_ms"],
+                    )
+                    results.append(result)
+
+                progress_bar.update(1)
+                if progress_callback:
+                    progress_callback(i + 1, sample_size)
+        else:
+            results_by_index: list[Optional[SurveyResult]] = [None] * total_personas
+            thread_local = threading.local()
+
+            def get_thread_client():
+                client = getattr(thread_local, "client", None)
+                if client is None:
+                    import openai
+                    client = openai.OpenAI()
+                    thread_local.client = client
+                return client
+
+            def worker(idx: int, persona: Persona):
+                system_prompt = persona_to_system_prompt(persona)
+                response = get_purchase_opinion_with_retry(
+                    persona_system_prompt=system_prompt,
+                    product_description=product_description,
+                    model=self.llm_model,
+                    client=get_thread_client(),
+                )
+                return idx, persona, response
+
+            completed = 0
+            with ThreadPoolExecutor(max_workers=resolved_concurrency) as executor:
+                futures = [
+                    executor.submit(worker, i, persona)
+                    for i, persona in enumerate(personas)
+                ]
+
+                for future in as_completed(futures):
+                    idx, persona, response = future.result()
+                    if response:
+                        self.cost_tracker.record_call(
+                            self.llm_model,
+                            response.get("usage", {}),
+                            response["cost"],
+                        )
+
+                        result = SurveyResult(
+                            persona_id=persona.persona_id,
+                            response_text=response["response_text"],
+                            ssr_score=0.0,
+                            persona_data=persona.to_dict(),
+                            tokens_used=response["tokens_used"],
+                            cost=response["cost"],
+                            latency_ms=response["latency_ms"],
+                        )
+                        results_by_index[idx] = result
+
+                    completed += 1
+                    progress_bar.update(1)
+                    if progress_callback:
+                        progress_callback(completed, sample_size)
+
+            for result in results_by_index:
+                if result is not None:
+                    results.append(result)
+
+        progress_bar.close()
+
+        response_texts = [result.response_text for result in results]
 
         if response_texts:
             if self.embedding_cache:
@@ -397,6 +480,7 @@ def run_survey(
     sample_size: int = 100,
     demographics: Optional[dict] = None,
     llm_model: Optional[str] = None,
+    max_concurrency: Optional[int] = None,
 ) -> AggregatedResults:
     """
     Convenience function to run a survey.
@@ -415,6 +499,7 @@ def run_survey(
         product_description=product_description,
         sample_size=sample_size,
         target_demographics=demographics,
+        max_concurrency=max_concurrency,
     )
 
 

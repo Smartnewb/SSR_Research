@@ -16,6 +16,7 @@ import openai
 
 from ..core.config import settings
 from .narrative_generator import NarrativeGenerator
+from .llm_utils import normalize_reasoning_effort
 from ..models.qie import (
     ActionItem,
     ActionPriority,
@@ -254,12 +255,19 @@ Extract sentiment, category, and keywords as JSON."""
 
         for attempt in range(settings.qie_tier1_max_retries):
             try:
-                api_response = await self.client.responses.create(
-                    model=settings.qie_tier1_model,
-                    input=f"{TIER1_SYSTEM_PROMPT}\n\n{user_prompt}",
-                    reasoning={"effort": settings.qie_tier1_reasoning_effort},
-                    text={"verbosity": settings.qie_tier1_verbosity},
+                reasoning_effort = normalize_reasoning_effort(
+                    settings.qie_tier1_model,
+                    settings.qie_tier1_reasoning_effort,
                 )
+                create_params = {
+                    "model": settings.qie_tier1_model,
+                    "input": f"{TIER1_SYSTEM_PROMPT}\n\n{user_prompt}",
+                    "text": {"verbosity": settings.qie_tier1_verbosity},
+                }
+                if reasoning_effort:
+                    create_params["reasoning"] = {"effort": reasoning_effort}
+
+                api_response = await self.client.responses.create(**create_params)
 
                 output_text = api_response.output_text.strip()
 
@@ -534,13 +542,20 @@ Provide actionable insights in the specified format."""
         full_input = f"{TIER2_SYSTEM_PROMPT}\n\n{user_prompt}"
 
         try:
-            response = await self.client.responses.create(
-                model=settings.qie_tier2_model,
-                input=full_input,
-                max_output_tokens=settings.qie_tier2_max_output_tokens,
-                reasoning={"effort": settings.qie_tier2_reasoning_effort},
-                text={"verbosity": settings.qie_tier2_verbosity},
+            reasoning_effort = normalize_reasoning_effort(
+                settings.qie_tier2_model,
+                settings.qie_tier2_reasoning_effort,
             )
+            create_params = {
+                "model": settings.qie_tier2_model,
+                "input": full_input,
+                "max_output_tokens": settings.qie_tier2_max_output_tokens,
+                "text": {"verbosity": settings.qie_tier2_verbosity},
+            }
+            if reasoning_effort:
+                create_params["reasoning"] = {"effort": reasoning_effort}
+
+            response = await self.client.responses.create(**create_params)
 
             analysis_text = response.output_text
 

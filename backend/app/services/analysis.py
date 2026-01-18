@@ -12,6 +12,7 @@ import os
 from typing import Optional
 from dataclasses import dataclass, field
 
+from .llm_utils import normalize_reasoning_effort
 
 def _get_analysis_model() -> str:
     """Get analysis model from environment or fallback."""
@@ -102,13 +103,17 @@ async def analyze_survey_responses(
 
 {analysis_prompt}"""
 
-    response = client.responses.create(
-        model=config.model,
-        input=full_input,
-        max_output_tokens=config.max_output_tokens,
-        reasoning={"effort": config.reasoning_effort},
-        text={"verbosity": config.verbosity},
-    )
+    reasoning_effort = normalize_reasoning_effort(config.model, config.reasoning_effort)
+    create_params = {
+        "model": config.model,
+        "input": full_input,
+        "max_output_tokens": config.max_output_tokens,
+        "text": {"verbosity": config.verbosity},
+    }
+    if reasoning_effort:
+        create_params["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.responses.create(**create_params)
 
     analysis_text = response.output_text
 
@@ -145,13 +150,17 @@ async def extract_deal_breakers(
 
 {prompt}"""
 
-    response = client.responses.create(
-        model=config.model,
-        input=full_input,
-        max_output_tokens=config.max_output_tokens,
-        reasoning={"effort": config.reasoning_effort},
-        text={"verbosity": config.verbosity},
-    )
+    reasoning_effort = normalize_reasoning_effort(config.model, config.reasoning_effort)
+    create_params = {
+        "model": config.model,
+        "input": full_input,
+        "max_output_tokens": config.max_output_tokens,
+        "text": {"verbosity": config.verbosity},
+    }
+    if reasoning_effort:
+        create_params["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.responses.create(**create_params)
 
     return _parse_deal_breaker_response(response.output_text)
 
@@ -187,13 +196,17 @@ async def generate_marketing_strategy(
 
 {prompt}"""
 
-    response = client.responses.create(
-        model=config.model,
-        input=full_input,
-        max_output_tokens=config.max_output_tokens,
-        reasoning={"effort": config.reasoning_effort},
-        text={"verbosity": config.verbosity},
-    )
+    reasoning_effort = normalize_reasoning_effort(config.model, config.reasoning_effort)
+    create_params = {
+        "model": config.model,
+        "input": full_input,
+        "max_output_tokens": config.max_output_tokens,
+        "text": {"verbosity": config.verbosity},
+    }
+    if reasoning_effort:
+        create_params["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.responses.create(**create_params)
 
     return _parse_strategy_response(response.output_text)
 

@@ -11,6 +11,7 @@ import numpy as np
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from .llm_utils import get_max_tokens_param, normalize_reasoning_effort
 
 def _get_persona_model() -> str:
     """Get persona enrichment model from environment or fallback."""
@@ -216,15 +217,15 @@ def enrich_persona_with_llm(
     Hybrid approach: Python generates statistical skeleton,
     LLM adds realistic narrative details.
 
-    Per GPT-5.2 guidelines: Uses reasoning_effort="none" to enable temperature
-    for creative variation in persona generation.
+    Note: gpt-5-nano supports reasoning_effort: minimal/low/medium/high (NOT none)
+    and does NOT support temperature parameter.
 
     Args:
         persona: Base persona dict from generate_synthetic_sample()
         product_context: Optional product/service category for context
         model: LLM model to use (default from env or gpt-5-nano for cost efficiency)
         client: Optional OpenAI client
-        temperature: Sampling temperature for diversity (default: 0.8)
+        temperature: DEPRECATED - not used (gpt-5-nano doesn't support it)
 
     Returns:
         Enriched persona dict with 'bio' and 'personalized_concerns' fields
@@ -242,13 +243,16 @@ def enrich_persona_with_llm(
     else:
         prompt = _create_english_enrichment_prompt(persona, product_context)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        max_completion_tokens=150,
-        reasoning_effort="none",
-        temperature=temperature,
-    )
+    reasoning_effort = normalize_reasoning_effort(model, "minimal")
+    create_params = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        **get_max_tokens_param(model, 150),
+    }
+    if reasoning_effort:
+        create_params["reasoning_effort"] = reasoning_effort
+
+    response = client.chat.completions.create(**create_params)
 
     bio_text = response.choices[0].message.content.strip()
 
@@ -666,20 +670,20 @@ def enrich_persona_with_llm_v2(
     """
     Step 3: Enrichment - GPT-5-mini + verbosity: high로 풍부한 서사 생성.
 
-    GPT-5.2 계열의 verbosity 파라미터를 활용하여 페르소나의 Bio와
+    GPT-5 계열의 verbosity 파라미터를 활용하여 페르소나의 Bio와
     사연을 구체적이고 길게 서술합니다.
 
-    Per GPT-5.2 guidelines:
-    - reasoning: none (단순 창작 작업이므로 추론 대기 시간 제거)
+    Note: gpt-5-mini supports reasoning_effort: minimal/low/medium/high (NOT none)
+    and does NOT support temperature parameter.
+    - reasoning: minimal (gpt-5-mini는 none 미지원)
     - verbosity: high (풍부한 데이터 생성)
-    - temperature: 0.8 (다양성 확보, reasoning=none일 때만 가능)
 
     Args:
         persona: 기본 페르소나 dict
         product_context: 제품/서비스 카테고리 컨텍스트
         model: 사용할 모델 (기본값: gpt-5-mini)
         client: OpenAI 클라이언트
-        temperature: 샘플링 온도 (기본값: 0.8)
+        temperature: DEPRECATED - not used (gpt-5-mini doesn't support it)
 
     Returns:
         Enriched persona dict with 'bio' field
@@ -698,14 +702,19 @@ def enrich_persona_with_llm_v2(
     else:
         prompt = _create_english_enrichment_prompt_v2(persona, product_context)
 
-    response = client.responses.create(
-        model=model,
-        input=prompt,
-        max_output_tokens=400,
-        reasoning={"effort": "none"},
-        text={"verbosity": verbosity},
-        temperature=temperature,
-    )
+    # Note: gpt-5-mini supports minimal/low/medium/high (NOT none)
+    # temperature not supported on gpt-5-mini
+    reasoning_effort = normalize_reasoning_effort(model, "minimal")
+    create_params = {
+        "model": model,
+        "input": prompt,
+        "max_output_tokens": 400,
+        "text": {"verbosity": verbosity},
+    }
+    if reasoning_effort:
+        create_params["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.responses.create(**create_params)
 
     bio_text = response.output_text.strip()
 

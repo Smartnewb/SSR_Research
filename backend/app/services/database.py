@@ -1,11 +1,13 @@
-"""SQLite database service for workflow persistence."""
+"""PostgreSQL database service for workflow persistence using Supabase."""
 
 import json
-import sqlite3
+import os
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 from ..models.workflow import (
     SurveyWorkflow,
@@ -16,178 +18,32 @@ from ..models.workflow import (
 )
 from ..models.comparison import ConceptInput
 
-DB_PATH = Path(__file__).parent.parent.parent / "data" / "workflows.db"
 
-
-def get_db_path() -> Path:
-    """Get database path, creating directory if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return DB_PATH
+def get_database_url() -> str:
+    """Get database URL from environment."""
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+    return url
 
 
 @contextmanager
 def get_connection():
     """Get database connection context manager."""
-    conn = sqlite3.connect(get_db_path(), detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(get_database_url(), cursor_factory=RealDictCursor)
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
 
 def init_database():
-    """Initialize database schema."""
-    with get_connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS workflows (
-                id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                current_step INTEGER NOT NULL,
-                product_json TEXT,
-                core_persona_json TEXT,
-                concepts_json TEXT,
-                sample_size INTEGER,
-                persona_generation_job_id TEXT,
-                survey_execution_job_id TEXT,
-                error_message TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                completed_at TEXT
-            )
-        """)
-
-        # Migration: Add concepts_json column if it doesn't exist
-        try:
-            conn.execute("ALTER TABLE workflows ADD COLUMN concepts_json TEXT")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
-        # Migration: Add archetypes_json column if it doesn't exist
-        try:
-            conn.execute("ALTER TABLE workflows ADD COLUMN archetypes_json TEXT")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
-        # Migration: Add use_multi_archetype column if it doesn't exist
-        try:
-            conn.execute("ALTER TABLE workflows ADD COLUMN use_multi_archetype INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
-        # Migration: Add currency column if it doesn't exist
-        try:
-            conn.execute("ALTER TABLE workflows ADD COLUMN currency TEXT DEFAULT 'KRW'")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS generation_jobs (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                total_personas INTEGER NOT NULL,
-                generated_count INTEGER NOT NULL,
-                progress REAL NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                error TEXT,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS generation_results (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                total_personas INTEGER NOT NULL,
-                distribution_stats_json TEXT NOT NULL,
-                personas_json TEXT NOT NULL,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS execution_jobs (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                total_respondents INTEGER NOT NULL,
-                completed_count INTEGER NOT NULL,
-                progress REAL NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                error TEXT,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS execution_results (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                total_respondents INTEGER NOT NULL,
-                execution_time REAL NOT NULL,
-                mean_score REAL NOT NULL,
-                median_score REAL NOT NULL,
-                std_dev REAL NOT NULL,
-                score_distribution_json TEXT NOT NULL,
-                results_json TEXT NOT NULL,
-                comparison_mode TEXT DEFAULT 'single',
-                concept_scores_json TEXT,
-                comparison_stats_json TEXT,
-                quick_insight_json TEXT,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
-
-        # Migration: Add new columns if they don't exist (for existing databases)
-        for column, col_type, default in [
-            ("comparison_mode", "TEXT", "'single'"),
-            ("concept_scores_json", "TEXT", "NULL"),
-            ("comparison_stats_json", "TEXT", "NULL"),
-            ("quick_insight_json", "TEXT", "NULL"),
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE execution_results ADD COLUMN {column} {col_type} DEFAULT {default}")
-            except Exception:
-                pass  # Column already exists
-
-        # QIE (Qualitative Insight Engine) tables
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS qie_jobs (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                progress REAL NOT NULL,
-                current_stage TEXT,
-                message TEXT,
-                total_responses INTEGER NOT NULL,
-                processed_count INTEGER NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                error TEXT,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS qie_results (
-                job_id TEXT PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                tier1_results_json TEXT NOT NULL,
-                aggregated_stats_json TEXT NOT NULL,
-                analysis_json TEXT NOT NULL,
-                execution_time REAL NOT NULL,
-                tier1_time REAL NOT NULL,
-                tier2_time REAL NOT NULL,
-                report_data_json TEXT,
-                report_generation_time REAL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (workflow_id) REFERENCES workflows(id)
-            )
-        """)
+    """Initialize database schema (tables should be created via migrations)."""
+    pass
 
 
 def _datetime_to_str(dt: Optional[datetime]) -> Optional[str]:
@@ -195,26 +51,46 @@ def _datetime_to_str(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
 
 
-def _str_to_datetime(s: Optional[str]) -> Optional[datetime]:
-    """Convert ISO string to datetime."""
-    return datetime.fromisoformat(s) if s else None
+def _str_to_datetime(s) -> Optional[datetime]:
+    """Convert ISO string or datetime to datetime."""
+    if s is None:
+        return None
+    if isinstance(s, datetime):
+        return s
+    return datetime.fromisoformat(s)
 
 
 def save_workflow(workflow: SurveyWorkflow):
     """Save workflow to database."""
     with get_connection() as conn:
+        cur = conn.cursor()
         product_json = workflow.product.model_dump_json() if workflow.product else None
         persona_json = workflow.core_persona.model_dump_json() if workflow.core_persona else None
         concepts_json = json.dumps([c.model_dump() for c in workflow.concepts]) if workflow.concepts else None
         archetypes_json = json.dumps([a.model_dump() for a in workflow.archetypes]) if workflow.archetypes else None
 
-        conn.execute("""
-            INSERT OR REPLACE INTO workflows (
+        cur.execute("""
+            INSERT INTO workflows (
                 id, status, current_step, product_json, core_persona_json,
                 concepts_json, archetypes_json, use_multi_archetype, currency,
                 sample_size, persona_generation_job_id, survey_execution_job_id,
                 error_message, created_at, updated_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                current_step = EXCLUDED.current_step,
+                product_json = EXCLUDED.product_json,
+                core_persona_json = EXCLUDED.core_persona_json,
+                concepts_json = EXCLUDED.concepts_json,
+                archetypes_json = EXCLUDED.archetypes_json,
+                use_multi_archetype = EXCLUDED.use_multi_archetype,
+                currency = EXCLUDED.currency,
+                sample_size = EXCLUDED.sample_size,
+                persona_generation_job_id = EXCLUDED.persona_generation_job_id,
+                survey_execution_job_id = EXCLUDED.survey_execution_job_id,
+                error_message = EXCLUDED.error_message,
+                updated_at = EXCLUDED.updated_at,
+                completed_at = EXCLUDED.completed_at
         """, (
             workflow.id,
             workflow.status.value,
@@ -223,7 +99,7 @@ def save_workflow(workflow: SurveyWorkflow):
             persona_json,
             concepts_json,
             archetypes_json,
-            1 if workflow.use_multi_archetype else 0,
+            workflow.use_multi_archetype,
             workflow.currency,
             workflow.sample_size,
             workflow.persona_generation_job_id,
@@ -238,10 +114,9 @@ def save_workflow(workflow: SurveyWorkflow):
 def load_workflow(workflow_id: str) -> Optional[SurveyWorkflow]:
     """Load workflow from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM workflows WHERE id = ?",
-            (workflow_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM workflows WHERE id = %s", (workflow_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -255,19 +130,17 @@ def load_workflow(workflow_id: str) -> Optional[SurveyWorkflow]:
             core_persona = CorePersona.model_validate_json(row["core_persona_json"])
 
         concepts = []
-        concepts_json_value = row["concepts_json"] if "concepts_json" in row.keys() else None
-        if concepts_json_value:
-            concepts_data = json.loads(concepts_json_value)
+        if row.get("concepts_json"):
+            concepts_data = json.loads(row["concepts_json"])
             concepts = [ConceptInput.model_validate(c) for c in concepts_data]
 
         archetypes = []
-        archetypes_json_value = row["archetypes_json"] if "archetypes_json" in row.keys() else None
-        if archetypes_json_value:
-            archetypes_data = json.loads(archetypes_json_value)
+        if row.get("archetypes_json"):
+            archetypes_data = json.loads(row["archetypes_json"])
             archetypes = [ArchetypeSegment.model_validate(a) for a in archetypes_data]
 
-        use_multi_archetype = bool(row["use_multi_archetype"]) if "use_multi_archetype" in row.keys() else False
-        currency = row["currency"] if "currency" in row.keys() and row["currency"] else "KRW"
+        use_multi_archetype = bool(row.get("use_multi_archetype", False))
+        currency = row.get("currency") or "KRW"
 
         return SurveyWorkflow(
             id=row["id"],
@@ -292,7 +165,9 @@ def load_workflow(workflow_id: str) -> Optional[SurveyWorkflow]:
 def load_all_workflows() -> list[SurveyWorkflow]:
     """Load all workflows from database."""
     with get_connection() as conn:
-        rows = conn.execute("SELECT id FROM workflows ORDER BY created_at DESC").fetchall()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM workflows ORDER BY created_at DESC")
+        rows = cur.fetchall()
         workflows = []
         for row in rows:
             workflow = load_workflow(row["id"])
@@ -304,7 +179,8 @@ def load_all_workflows() -> list[SurveyWorkflow]:
 def delete_workflow(workflow_id: str):
     """Delete workflow from database."""
     with get_connection() as conn:
-        conn.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
+        cur = conn.cursor()
+        cur.execute("DELETE FROM workflows WHERE id = %s", (workflow_id,))
 
 
 def save_generation_job(job_id: str, workflow_id: str, status: str,
@@ -314,11 +190,19 @@ def save_generation_job(job_id: str, workflow_id: str, status: str,
                         error: Optional[str] = None):
     """Save generation job status to database."""
     with get_connection() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO generation_jobs (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO generation_jobs (
                 job_id, workflow_id, status, total_personas, generated_count,
                 progress, started_at, completed_at, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                total_personas = EXCLUDED.total_personas,
+                generated_count = EXCLUDED.generated_count,
+                progress = EXCLUDED.progress,
+                completed_at = EXCLUDED.completed_at,
+                error = EXCLUDED.error
         """, (
             job_id, workflow_id, status, total_personas, generated_count,
             progress, _datetime_to_str(started_at),
@@ -329,10 +213,9 @@ def save_generation_job(job_id: str, workflow_id: str, status: str,
 def load_generation_job(job_id: str) -> Optional[dict]:
     """Load generation job from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM generation_jobs WHERE job_id = ?",
-            (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM generation_jobs WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -355,11 +238,16 @@ def save_generation_result(job_id: str, workflow_id: str,
                            personas: list[dict]):
     """Save generation result to database."""
     with get_connection() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO generation_results (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO generation_results (
                 job_id, workflow_id, total_personas,
                 distribution_stats_json, personas_json
-            ) VALUES (?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                total_personas = EXCLUDED.total_personas,
+                distribution_stats_json = EXCLUDED.distribution_stats_json,
+                personas_json = EXCLUDED.personas_json
         """, (
             job_id, workflow_id, total_personas,
             json.dumps(distribution_stats),
@@ -370,10 +258,9 @@ def save_generation_result(job_id: str, workflow_id: str,
 def load_generation_result(job_id: str) -> Optional[dict]:
     """Load generation result from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM generation_results WHERE job_id = ?",
-            (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM generation_results WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -394,11 +281,19 @@ def save_execution_job(job_id: str, workflow_id: str, status: str,
                        error: Optional[str] = None):
     """Save execution job status to database."""
     with get_connection() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO execution_jobs (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO execution_jobs (
                 job_id, workflow_id, status, total_respondents, completed_count,
                 progress, started_at, completed_at, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                total_respondents = EXCLUDED.total_respondents,
+                completed_count = EXCLUDED.completed_count,
+                progress = EXCLUDED.progress,
+                completed_at = EXCLUDED.completed_at,
+                error = EXCLUDED.error
         """, (
             job_id, workflow_id, status, total_respondents, completed_count,
             progress, _datetime_to_str(started_at),
@@ -409,10 +304,9 @@ def save_execution_job(job_id: str, workflow_id: str, status: str,
 def load_execution_job(job_id: str) -> Optional[dict]:
     """Load execution job from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM execution_jobs WHERE job_id = ?",
-            (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM execution_jobs WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -447,14 +341,27 @@ def save_execution_result(
 ):
     """Save execution result to database."""
     with get_connection() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO execution_results (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO execution_results (
                 job_id, workflow_id, total_respondents, execution_time,
                 mean_score, median_score, std_dev,
                 score_distribution_json, results_json,
                 comparison_mode, concept_scores_json,
                 comparison_stats_json, quick_insight_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                total_respondents = EXCLUDED.total_respondents,
+                execution_time = EXCLUDED.execution_time,
+                mean_score = EXCLUDED.mean_score,
+                median_score = EXCLUDED.median_score,
+                std_dev = EXCLUDED.std_dev,
+                score_distribution_json = EXCLUDED.score_distribution_json,
+                results_json = EXCLUDED.results_json,
+                comparison_mode = EXCLUDED.comparison_mode,
+                concept_scores_json = EXCLUDED.concept_scores_json,
+                comparison_stats_json = EXCLUDED.comparison_stats_json,
+                quick_insight_json = EXCLUDED.quick_insight_json
         """, (
             job_id, workflow_id, total_respondents, execution_time,
             mean_score, median_score, std_dev,
@@ -470,10 +377,9 @@ def save_execution_result(
 def load_execution_result(job_id: str) -> Optional[dict]:
     """Load execution result from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM execution_results WHERE job_id = ?",
-            (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM execution_results WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -488,10 +394,10 @@ def load_execution_result(job_id: str) -> Optional[dict]:
             "std_dev": row["std_dev"],
             "score_distribution": json.loads(row["score_distribution_json"]),
             "results": json.loads(row["results_json"]),
-            "comparison_mode": row["comparison_mode"] if row["comparison_mode"] else "single",
-            "concept_scores": json.loads(row["concept_scores_json"]) if row["concept_scores_json"] else None,
-            "comparison_stats": json.loads(row["comparison_stats_json"]) if row["comparison_stats_json"] else None,
-            "quick_insight": json.loads(row["quick_insight_json"]) if row["quick_insight_json"] else None,
+            "comparison_mode": row.get("comparison_mode") or "single",
+            "concept_scores": json.loads(row["concept_scores_json"]) if row.get("concept_scores_json") else None,
+            "comparison_stats": json.loads(row["comparison_stats_json"]) if row.get("comparison_stats_json") else None,
+            "quick_insight": json.loads(row["quick_insight_json"]) if row.get("quick_insight_json") else None,
         }
 
 
@@ -512,35 +418,42 @@ def save_qie_job(
 ):
     """Save QIE job status to database."""
     with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO qie_jobs (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO qie_jobs (
                 job_id, workflow_id, status, progress, current_stage, message,
                 total_responses, processed_count, started_at, completed_at, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                job_id,
-                workflow_id,
-                status,
-                progress,
-                current_stage,
-                message,
-                total_responses,
-                processed_count,
-                _datetime_to_str(started_at),
-                _datetime_to_str(completed_at),
-                error,
-            ),
-        )
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                progress = EXCLUDED.progress,
+                current_stage = EXCLUDED.current_stage,
+                message = EXCLUDED.message,
+                total_responses = EXCLUDED.total_responses,
+                processed_count = EXCLUDED.processed_count,
+                completed_at = EXCLUDED.completed_at,
+                error = EXCLUDED.error
+        """, (
+            job_id,
+            workflow_id,
+            status,
+            progress,
+            current_stage,
+            message,
+            total_responses,
+            processed_count,
+            _datetime_to_str(started_at),
+            _datetime_to_str(completed_at),
+            error,
+        ))
 
 
 def load_qie_job(job_id: str) -> Optional[dict]:
     """Load QIE job from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM qie_jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM qie_jobs WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -563,10 +476,12 @@ def load_qie_job(job_id: str) -> Optional[dict]:
 def load_qie_job_by_workflow(workflow_id: str) -> Optional[dict]:
     """Load most recent QIE job for a workflow."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM qie_jobs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 1",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM qie_jobs WHERE workflow_id = %s ORDER BY started_at DESC LIMIT 1",
             (workflow_id,),
-        ).fetchone()
+        )
+        row = cur.fetchone()
 
         if not row:
             return None
@@ -598,43 +513,38 @@ def update_qie_job_progress(
 ):
     """Update QIE job progress without overwriting started_at."""
     with get_connection() as conn:
+        cur = conn.cursor()
         if completed_at:
-            conn.execute(
-                """
+            cur.execute("""
                 UPDATE qie_jobs SET
-                    status = ?, progress = ?, processed_count = ?,
-                    current_stage = ?, message = ?, completed_at = ?, error = ?
-                WHERE job_id = ?
-            """,
-                (
-                    status,
-                    progress,
-                    processed_count,
-                    current_stage,
-                    message,
-                    _datetime_to_str(completed_at),
-                    error,
-                    job_id,
-                ),
-            )
+                    status = %s, progress = %s, processed_count = %s,
+                    current_stage = %s, message = %s, completed_at = %s, error = %s
+                WHERE job_id = %s
+            """, (
+                status,
+                progress,
+                processed_count,
+                current_stage,
+                message,
+                _datetime_to_str(completed_at),
+                error,
+                job_id,
+            ))
         else:
-            conn.execute(
-                """
+            cur.execute("""
                 UPDATE qie_jobs SET
-                    status = ?, progress = ?, processed_count = ?,
-                    current_stage = ?, message = ?, error = ?
-                WHERE job_id = ?
-            """,
-                (
-                    status,
-                    progress,
-                    processed_count,
-                    current_stage,
-                    message,
-                    error,
-                    job_id,
-                ),
-            )
+                    status = %s, progress = %s, processed_count = %s,
+                    current_stage = %s, message = %s, error = %s
+                WHERE job_id = %s
+            """, (
+                status,
+                progress,
+                processed_count,
+                current_stage,
+                message,
+                error,
+                job_id,
+            ))
 
 
 def save_qie_result(
@@ -651,41 +561,47 @@ def save_qie_result(
 ):
     """Save QIE result to database."""
     with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO qie_results (
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO qie_results (
                 job_id, workflow_id, tier1_results_json, aggregated_stats_json,
                 analysis_json, execution_time, tier1_time, tier2_time,
                 report_data_json, report_generation_time, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                job_id,
-                workflow_id,
-                json.dumps(tier1_results),
-                json.dumps(aggregated_stats),
-                json.dumps(analysis),
-                execution_time,
-                tier1_time,
-                tier2_time,
-                json.dumps(report_data) if report_data else None,
-                report_generation_time,
-                _datetime_to_str(datetime.now()),
-            ),
-        )
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (job_id) DO UPDATE SET
+                tier1_results_json = EXCLUDED.tier1_results_json,
+                aggregated_stats_json = EXCLUDED.aggregated_stats_json,
+                analysis_json = EXCLUDED.analysis_json,
+                execution_time = EXCLUDED.execution_time,
+                tier1_time = EXCLUDED.tier1_time,
+                tier2_time = EXCLUDED.tier2_time,
+                report_data_json = EXCLUDED.report_data_json,
+                report_generation_time = EXCLUDED.report_generation_time
+        """, (
+            job_id,
+            workflow_id,
+            json.dumps(tier1_results),
+            json.dumps(aggregated_stats),
+            json.dumps(analysis),
+            execution_time,
+            tier1_time,
+            tier2_time,
+            json.dumps(report_data) if report_data else None,
+            report_generation_time,
+            _datetime_to_str(datetime.now()),
+        ))
 
 
 def load_qie_result(job_id: str) -> Optional[dict]:
     """Load QIE result from database."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM qie_results WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM qie_results WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
 
         if not row:
             return None
 
-        report_data_json = row["report_data_json"] if "report_data_json" in row.keys() else None
         return {
             "job_id": row["job_id"],
             "workflow_id": row["workflow_id"],
@@ -695,8 +611,8 @@ def load_qie_result(job_id: str) -> Optional[dict]:
             "execution_time": row["execution_time"],
             "tier1_time": row["tier1_time"],
             "tier2_time": row["tier2_time"],
-            "report_data": json.loads(report_data_json) if report_data_json else None,
-            "report_generation_time": row["report_generation_time"] if "report_generation_time" in row.keys() else None,
+            "report_data": json.loads(row["report_data_json"]) if row.get("report_data_json") else None,
+            "report_generation_time": row.get("report_generation_time"),
             "created_at": _str_to_datetime(row["created_at"]),
         }
 
@@ -704,15 +620,16 @@ def load_qie_result(job_id: str) -> Optional[dict]:
 def load_qie_result_by_workflow(workflow_id: str) -> Optional[dict]:
     """Load most recent QIE result for a workflow."""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM qie_results WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 1",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM qie_results WHERE workflow_id = %s ORDER BY created_at DESC LIMIT 1",
             (workflow_id,),
-        ).fetchone()
+        )
+        row = cur.fetchone()
 
         if not row:
             return None
 
-        report_data_json = row["report_data_json"] if "report_data_json" in row.keys() else None
         return {
             "job_id": row["job_id"],
             "workflow_id": row["workflow_id"],
@@ -722,11 +639,11 @@ def load_qie_result_by_workflow(workflow_id: str) -> Optional[dict]:
             "execution_time": row["execution_time"],
             "tier1_time": row["tier1_time"],
             "tier2_time": row["tier2_time"],
-            "report_data": json.loads(report_data_json) if report_data_json else None,
-            "report_generation_time": row["report_generation_time"] if "report_generation_time" in row.keys() else None,
+            "report_data": json.loads(row["report_data_json"]) if row.get("report_data_json") else None,
+            "report_generation_time": row.get("report_generation_time"),
             "created_at": _str_to_datetime(row["created_at"]),
         }
 
 
-# Initialize database on module import
+# Initialize database on module import (no-op for PostgreSQL, schema via migrations)
 init_database()

@@ -12,6 +12,7 @@ from typing import Optional, Callable
 import openai
 
 from ..core.config import settings
+from .llm_utils import normalize_reasoning_effort
 
 
 # Prompt 1: Executive Summary
@@ -238,12 +239,19 @@ class NarrativeGenerator:
 
         for attempt in range(3):
             try:
-                response = await self.client.responses.create(
-                    model=settings.qie_tier2_model,  # gpt-5.2
-                    input=formatted_prompt,
-                    reasoning={"effort": reasoning_effort},
-                    text={"verbosity": "medium"},
+                normalized_effort = normalize_reasoning_effort(
+                    settings.qie_tier2_model,
+                    reasoning_effort,
                 )
+                create_params = {
+                    "model": settings.qie_tier2_model,
+                    "input": formatted_prompt,
+                    "text": {"verbosity": "medium"},
+                }
+                if normalized_effort:
+                    create_params["reasoning"] = {"effort": normalized_effort}
+
+                response = await self.client.responses.create(**create_params)
 
                 output_text = response.output_text.strip()
 

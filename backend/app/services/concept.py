@@ -4,6 +4,8 @@ import json
 import os
 from openai import OpenAI
 
+from .llm_utils import get_max_tokens_param, normalize_reasoning_effort
+
 
 def _get_concept_model() -> str:
     """Get concept model from environment or fallback."""
@@ -41,17 +43,21 @@ Category: {context.get('product_category', 'consumer product')}
 Provide 3 different versions, each with a brief rationale explaining why it works.
 Output as JSON: {{"suggestions": [{{"text": "...", "rationale": "..."}}]}}"""
 
-    response = client.chat.completions.create(
-        model=_get_concept_model(),
-        messages=[
+    model = _get_concept_model()
+    reasoning_effort = normalize_reasoning_effort(model, "minimal")
+    create_params = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Rough idea: {rough_idea}\n\nGenerate 3 polished versions."}
+            {"role": "user", "content": f"Rough idea: {rough_idea}\n\nGenerate 3 polished versions."},
         ],
-        response_format={"type": "json_object"},
-        reasoning_effort="none",
-        temperature=0.8,
-        max_completion_tokens=1000,
-    )
+        "response_format": {"type": "json_object"},
+        **get_max_tokens_param(model, 1000),
+    }
+    if reasoning_effort:
+        create_params["reasoning_effort"] = reasoning_effort
+
+    response = client.chat.completions.create(**create_params)
 
     result = json.loads(response.choices[0].message.content)
     return result.get("suggestions", [])
@@ -134,17 +140,21 @@ Output as JSON:
 
     concept_text = "\n".join([f"{k}: {v}" for k, v in concept.items()])
 
-    response = client.chat.completions.create(
-        model=_get_concept_model(),
-        messages=[
+    model = _get_concept_model()
+    reasoning_effort = normalize_reasoning_effort(model, "minimal")
+    create_params = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Evaluate this concept:\n\n{concept_text}"}
+            {"role": "user", "content": f"Evaluate this concept:\n\n{concept_text}"},
         ],
-        response_format={"type": "json_object"},
-        reasoning_effort="none",
-        temperature=0.3,
-        max_completion_tokens=1500,
-    )
+        "response_format": {"type": "json_object"},
+        **get_max_tokens_param(model, 1500),
+    }
+    if reasoning_effort:
+        create_params["reasoning_effort"] = reasoning_effort
+
+    response = client.chat.completions.create(**create_params)
 
     return json.loads(response.choices[0].message.content)
 

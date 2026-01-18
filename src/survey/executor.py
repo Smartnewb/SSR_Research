@@ -10,6 +10,12 @@ from typing import Optional
 
 from .prompts import create_survey_prompt, create_reinforced_prompt
 from .validator import validate_llm_response
+from ..llm_utils import (
+    can_use_temperature,
+    get_max_tokens_param,
+    is_gpt5_model,
+    normalize_reasoning_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +25,10 @@ def _get_default_model() -> str:
     return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
 
 
-def _get_reasoning_effort(model: str = "") -> str:
-    """Get reasoning effort from environment or appropriate default for model.
-
-    Per GPT-5.2 docs:
-    - GPT 5 (gpt-5, gpt-5-mini, gpt-5-nano): supports minimal, low, medium (default), high
-    - GPT 5.1, 5.2: supports none (default), low, medium, high, xhigh
-
-    'none' is NOT supported by older GPT-5 models!
-    """
+def _get_reasoning_effort(model: str = "") -> Optional[str]:
+    """Get reasoning effort from environment or appropriate default for model."""
     env_value = os.getenv("SURVEY_REASONING_EFFORT")
-    if env_value:
-        return env_value
-
-    # Older GPT-5 models don't support 'none', use 'minimal' instead
-    older_gpt5_models = {"gpt-5", "gpt-5-mini", "gpt-5-nano"}
-    if model in older_gpt5_models:
-        return "minimal"
-
-    # GPT-5.1, GPT-5.2 support 'none' as default
-    return "none"
+    return normalize_reasoning_effort(model, env_value)
 
 
 PRICING = {
@@ -61,26 +51,12 @@ PRICING = {
     },
 }
 
-GPT5_MODELS = {"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.2"}
-
-
-def get_max_tokens_param(model: str, value: int) -> dict:
-    """Return appropriate max tokens parameter based on model.
-
-    GPT-5 series uses 'max_completion_tokens' instead of 'max_tokens'.
-    """
-    if model in GPT5_MODELS:
-        return {"max_completion_tokens": value}
-    return {"max_tokens": value}
-
-
 def supports_temperature(model: str, reasoning_effort: str = "none") -> bool:
     """Check if model supports temperature parameter.
 
     Per GPT-5.2 docs: temperature, top_p, logprobs are ONLY supported
-    when reasoning_effort is set to "none".
-
-    Additionally, gpt-5-nano only supports the default temperature (1).
+    when reasoning_effort is set to "none" for GPT-5.1/5.2. Older GPT-5
+    models do not support them.
 
     Args:
         model: Model name
@@ -89,12 +65,7 @@ def supports_temperature(model: str, reasoning_effort: str = "none") -> bool:
     Returns:
         True if temperature can be used with non-default values
     """
-    # gpt-5-nano only supports default temperature (1)
-    if model == "gpt-5-nano":
-        return False
-    if model not in GPT5_MODELS:
-        return True
-    return reasoning_effort == "none"
+    return can_use_temperature(model, reasoning_effort)
 
 
 def calculate_cost(model: str, usage: dict) -> float:
@@ -161,7 +132,10 @@ def get_purchase_opinion(
         client = openai.OpenAI()
 
     model = model or _get_default_model()
-    reasoning_effort = reasoning_effort or _get_reasoning_effort(model)
+    reasoning_effort = normalize_reasoning_effort(
+        model,
+        reasoning_effort or _get_reasoning_effort(model),
+    )
 
     start_time = time.time()
 
@@ -180,7 +154,7 @@ def get_purchase_opinion(
         api_params["temperature"] = temperature
 
     # Add reasoning_effort for GPT-5 models
-    if model in GPT5_MODELS and reasoning_effort:
+    if is_gpt5_model(model) and reasoning_effort:
         api_params["reasoning_effort"] = reasoning_effort
 
     response = client.chat.completions.create(**api_params)
@@ -234,7 +208,10 @@ def get_purchase_opinion_with_retry(
     import openai
 
     model = model or _get_default_model()
-    reasoning_effort = reasoning_effort or _get_reasoning_effort(model)
+    reasoning_effort = normalize_reasoning_effort(
+        model,
+        reasoning_effort or _get_reasoning_effort(model),
+    )
     reinforced = False
 
     for attempt in range(max_retries):
@@ -253,7 +230,7 @@ def get_purchase_opinion_with_retry(
             # gpt-5-nano needs 1000+ with minimal reasoning to produce actual text
             if model == "gpt-5-nano":
                 max_tokens = 1000
-            elif model in GPT5_MODELS:
+            elif is_gpt5_model(model):
                 max_tokens = 800
             else:
                 max_tokens = 200
@@ -268,7 +245,7 @@ def get_purchase_opinion_with_retry(
             }
 
             # Add reasoning_effort for GPT-5 models
-            if model in GPT5_MODELS and reasoning_effort:
+            if is_gpt5_model(model) and reasoning_effort:
                 api_params["reasoning_effort"] = reasoning_effort
 
             if supports_temperature(model, reasoning_effort):

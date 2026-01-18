@@ -10,6 +10,7 @@ from typing import Optional
 import openai
 
 from .tier1_tagger import Tier1Tagger, Tier1TagResult
+from ..llm_utils import get_max_tokens_param, normalize_reasoning_effort
 
 
 QUICK_SUMMARY_PROMPT = """You are a market research analyst. Based on the aggregated survey data below,
@@ -151,15 +152,18 @@ class QuickAnalyzer:
         )
 
         try:
-            completion = await self.client.chat.completions.create(
-                model=self.summary_model,
-                messages=[
+            reasoning_effort = normalize_reasoning_effort(self.summary_model, "minimal")
+            create_params = {
+                "model": self.summary_model,
+                "messages": [
                     {"role": "user", "content": prompt},
                 ],
-                # Note: gpt-5-mini requires reasoning_effort but not temperature
-                reasoning_effort="minimal",
-                max_completion_tokens=800,
-            )
+                **get_max_tokens_param(self.summary_model, 800),
+            }
+            if reasoning_effort:
+                create_params["reasoning_effort"] = reasoning_effort
+
+            completion = await self.client.chat.completions.create(**create_params)
 
             content = completion.choices[0].message.content or "{}"
             # Remove markdown code blocks

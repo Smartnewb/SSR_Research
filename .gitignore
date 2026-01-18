@@ -66,3 +66,5 @@ status.json
 # OS
 .DS_Store
 Thumbs.db
+backend/survey_workflows.db
+backend/data/*.db

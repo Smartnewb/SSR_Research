@@ -4,6 +4,12 @@ import os
 from openai import AsyncOpenAI
 
 from ..core.config import settings
+from .llm_utils import (
+    can_use_temperature,
+    is_gpt52_or_51,
+    is_gpt5_model,
+    normalize_reasoning_effort,
+)
 
 client = AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -84,37 +90,27 @@ Return a JSON object with:
 
     try:
         model = _get_gemini_research_model()
+        reasoning_effort = normalize_reasoning_effort(model, "none")
 
-        # GPT-5 family (gpt-5-nano, gpt-5-mini) doesn't support temperature/reasoning_effort="none"
-        # Only GPT-5.2/5.1 with reasoning_effort="none" supports temperature
-        if model.startswith("gpt-5."):
-            # GPT-5.2 or GPT-5.1: use reasoning_effort="none" with temperature
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a market research expert. Return only valid JSON.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                reasoning_effort="none",
-                temperature=0.7,
-                response_format={"type": "json_object"},
-            )
-        else:
-            # GPT-5 family (gpt-5-nano, gpt-5-mini, etc.): no temperature/reasoning_effort params
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a market research expert. Return only valid JSON.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-            )
+        create_params = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a market research expert. Return only valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+
+        if is_gpt5_model(model) and reasoning_effort:
+            create_params["reasoning_effort"] = reasoning_effort
+
+        if is_gpt52_or_51(model) and can_use_temperature(model, reasoning_effort):
+            create_params["temperature"] = 0.7
+
+        response = await client.chat.completions.create(**create_params)
 
         content = response.choices[0].message.content
         if not content:
