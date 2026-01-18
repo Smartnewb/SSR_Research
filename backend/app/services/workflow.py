@@ -257,16 +257,23 @@ class WorkflowService:
             raise ValueError(f"Workflow {workflow_id} not found")
 
         # Allow setting concepts after persona generation or when already in concepts step
+        # Also allow retry from FAILED or COMPLETED state (user wants to re-run with different concepts)
         allowed_statuses = [
             WorkflowStatus.GENERATING_PERSONAS,
             WorkflowStatus.CONCEPTS_MANAGEMENT,
             WorkflowStatus.SURVEYING,
+            WorkflowStatus.FAILED,  # Allow retry after failure
+            WorkflowStatus.COMPLETED,  # Allow re-run with modified concepts
         ]
         if workflow.status not in allowed_statuses:
             raise ValueError(
                 f"Cannot update concepts in status {workflow.status}. "
                 "Complete persona generation first."
             )
+
+        # Clear error message when retrying from FAILED state
+        if workflow.status == WorkflowStatus.FAILED:
+            workflow.error_message = None
 
         if not concepts or len(concepts) < 1:
             raise ValueError("At least 1 concept is required")
@@ -290,10 +297,19 @@ class WorkflowService:
         if not workflow:
             raise ValueError(f"Workflow {workflow_id} not found")
 
-        if workflow.status != WorkflowStatus.CONCEPTS_MANAGEMENT:
+        # Allow confirming from CONCEPTS_MANAGEMENT or FAILED (retry)
+        allowed_statuses = [
+            WorkflowStatus.CONCEPTS_MANAGEMENT,
+            WorkflowStatus.FAILED,  # Allow retry after failure
+        ]
+        if workflow.status not in allowed_statuses:
             raise ValueError(
                 f"Cannot confirm concepts in status {workflow.status}"
             )
+
+        # Clear error message when retrying from FAILED state
+        if workflow.status == WorkflowStatus.FAILED:
+            workflow.error_message = None
 
         if not workflow.concepts:
             raise ValueError("No concepts to confirm. Add at least 1 concept.")
@@ -427,6 +443,12 @@ class WorkflowService:
         # Refresh from database
         self._load_from_database()
         return list(self._workflows.values())
+
+    def delete_workflow(self, workflow_id: str) -> None:
+        """Delete a workflow by ID."""
+        if workflow_id in self._workflows:
+            del self._workflows[workflow_id]
+        db.delete_workflow(workflow_id)
 
 
 _workflow_service: Optional[WorkflowService] = None
