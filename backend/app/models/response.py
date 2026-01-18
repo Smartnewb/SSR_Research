@@ -42,6 +42,25 @@ class SurveyStatus(BaseModel):
     error_message: Optional[str] = None
 
 
+class PainPointPreview(BaseModel):
+    """무료 결과용 Pain Point 미리보기."""
+
+    rank: int = Field(..., ge=1, le=3)
+    title: str = Field(..., max_length=50)
+    category: str  # Price, UX, Trust, Feature, Convenience
+    is_unlocked: bool = False
+    description: Optional[str] = None
+    affected_percentage: Optional[float] = Field(None, ge=0, le=100)
+
+
+class QuickInsight(BaseModel):
+    """무료 결과용 경량 인사이트."""
+
+    one_liner: str = Field(..., max_length=200)
+    pain_points: list[PainPointPreview] = Field(..., min_length=1, max_length=3)
+    generated_at: datetime = Field(default_factory=datetime.now)
+
+
 class SurveyResponse(BaseModel):
     """Response model for survey results."""
 
@@ -58,6 +77,7 @@ class SurveyResponse(BaseModel):
     total_tokens: int
     execution_time_seconds: float
     results: list[SurveyResultItem]
+    quick_insight: Optional[QuickInsight] = None
     created_at: datetime = Field(default_factory=datetime.now)
 
     model_config = {

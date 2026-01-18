@@ -1,11 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { BarChart3, Clock, DollarSign, TrendingUp } from "lucide-react";
 import type { SurveyResponse } from "@/lib/types";
 import { formatCost, formatDuration, getScoreColor } from "@/lib/api";
 import { MetricCard } from "./MetricCard";
 import { ScoreDistribution } from "./ScoreDistribution";
 import { ResponseTable } from "./ResponseTable";
+import { QuickInsightCard } from "./QuickInsightCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -15,6 +17,8 @@ interface ResultsDashboardProps {
 }
 
 export function ResultsDashboard({ results, onReset }: ResultsDashboardProps) {
+  const router = useRouter();
+
   const exportToCSV = () => {
     const headers = ["persona_id", "ssr_score", "likert_5", "scale_10", "response_text"];
     const rows = results.results.map((r) => [
@@ -89,6 +93,14 @@ export function ResultsDashboard({ results, onReset }: ResultsDashboardProps) {
       </div>
 
       <ScoreDistribution distribution={results.score_distribution} />
+
+      {/* Quick Insight Card */}
+      {results.quick_insight && (
+        <QuickInsightCard
+          insight={results.quick_insight}
+          onUpgradeClick={() => router.push("/qie")}
+        />
+      )}
 
       <ResponseTable results={results.results} />
     </div>

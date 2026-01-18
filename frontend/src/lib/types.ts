@@ -39,6 +39,22 @@ export interface SurveyResultItem {
   latency_ms: number;
 }
 
+// Quick Insight types for free tier
+export interface PainPointPreview {
+  rank: number;
+  title: string;
+  category: string;
+  is_unlocked: boolean;
+  description?: string;
+  affected_percentage?: number;
+}
+
+export interface QuickInsight {
+  one_liner: string;
+  pain_points: PainPointPreview[];
+  generated_at: string;
+}
+
 export interface SurveyResponse {
   survey_id: string;
   product_description: string;
@@ -53,6 +69,7 @@ export interface SurveyResponse {
   total_tokens: number;
   execution_time_seconds: number;
   results: SurveyResultItem[];
+  quick_insight?: QuickInsight;
   created_at: string;
 }
 

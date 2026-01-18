@@ -1,5 +1,6 @@
 """Survey execution service."""
 
+import asyncio
 import sys
 import time
 import uuid
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from src.pipeline import SSRPipeline
 from src.ab_testing import run_ab_test, ABTestResult
 from src.ssr.utils import to_likert_5, to_scale_10
+from src.insights import QuickAnalyzer, QuickInsightData
 
 from ..models.request import SurveyRequest, ABTestRequest
 from ..models.response import (
@@ -19,6 +21,8 @@ from ..models.response import (
     SurveyResultItem,
     ABTestResponse,
     ABTestStatistics,
+    QuickInsight,
+    PainPointPreview,
 )
 
 
@@ -28,6 +32,25 @@ class SurveyService:
     def __init__(self, llm_model: str = "gpt-5-nano"):
         self.llm_model = llm_model
         self.pipeline = SSRPipeline(llm_model=llm_model)
+
+    def _convert_quick_insight(self, data: QuickInsightData) -> QuickInsight:
+        """Convert QuickInsightData to API response model."""
+        pain_points = []
+        for i, pp in enumerate(data.pain_points):
+            pain_points.append(PainPointPreview(
+                rank=pp.rank,
+                title=pp.title,
+                category=pp.category,
+                is_unlocked=(i == 0),  # Only first one is unlocked
+                description=pp.description if i == 0 else None,
+                affected_percentage=pp.affected_percentage if i == 0 else None,
+            ))
+
+        return QuickInsight(
+            one_liner=data.one_liner,
+            pain_points=pain_points,
+            generated_at=data.generated_at,
+        )
 
     def run_survey(
         self,
@@ -76,6 +99,28 @@ class SurveyService:
             for r in results.results
         ]
 
+        # Generate quick insight for free tier
+        quick_insight = None
+        if not request.use_mock and len(result_items) >= 10:
+            try:
+                responses_for_analysis = [
+                    {
+                        "persona_id": r.persona_id,
+                        "response_text": r.response_text,
+                        "ssr_score": r.ssr_score,
+                    }
+                    for r in result_items
+                ]
+                analyzer = QuickAnalyzer()
+                insight_data = asyncio.run(
+                    analyzer.analyze(responses_for_analysis, results.mean_score)
+                )
+                quick_insight = self._convert_quick_insight(insight_data)
+            except Exception as e:
+                # Log but don't fail the survey
+                print(f"QuickInsight generation failed: {e}")
+                quick_insight = None
+
         return SurveyResponse(
             survey_id=survey_id,
             product_description=request.product_description,
@@ -90,6 +135,7 @@ class SurveyService:
             total_tokens=results.total_tokens,
             execution_time_seconds=execution_time,
             results=result_items,
+            quick_insight=quick_insight,
         )
 
     def run_ab_test(
