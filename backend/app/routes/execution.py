@@ -15,6 +15,7 @@ import numpy as np
 from ..core.config import settings  # Triggers load_dotenv() for OPENAI_API_KEY
 from ..services.survey import SurveyService
 from ..services.workflow import get_workflow_service
+from src.insights import QuickAnalyzer
 from ..services.persona_generation import persona_to_system_prompt
 from ..services import database as db
 from ..models.comparison import ConceptInput
@@ -92,6 +93,14 @@ class ComparisonStatistics(BaseModel):
     interpretation: str = ""
 
 
+class QuickInsightPreview(BaseModel):
+    """Quick insight preview for free tier."""
+
+    one_liner: str
+    pain_points: list[dict]
+    generated_at: str
+
+
 class ExecutionResult(BaseModel):
     """Result of survey execution."""
 
@@ -109,6 +118,8 @@ class ExecutionResult(BaseModel):
     comparison_mode: str = "single"  # "single", "ab_test", "multi_compare"
     concept_scores: Optional[list[ConceptScore]] = None
     comparison_stats: Optional[ComparisonStatistics] = None
+    # Quick insight for free tier
+    quick_insight: Optional[QuickInsightPreview] = None
 
 
 # In-memory cache for active jobs
@@ -408,8 +419,8 @@ async def _execute_survey_background(
         for concept in concepts:
             # Build product description with null safety
             headline = concept.headline or concept.title or "Product"
-            benefit = concept.benefit or "Key benefits"
-            rtb = concept.rtb or "Quality assured"
+            benefit = ", ".join(concept.benefits) if concept.benefits else "Key benefits"
+            rtb = ", ".join(concept.rtb) if concept.rtb else "Quality assured"
             price = concept.price or "Contact for pricing"
             product_desc = f"{headline}\n\n{benefit}\n\nReason to believe: {rtb}\n\nPrice: {price}"
 
@@ -442,6 +453,42 @@ async def _execute_survey_background(
         for cs in concept_scores:
             all_results.extend(cs.results)
 
+        # Generate QuickInsight for free tier (only for non-mock with 10+ responses)
+        quick_insight = None
+        if not use_mock and len(all_results) >= 10:
+            try:
+                responses_for_analysis = [
+                    {
+                        "persona_id": r["persona_id"],
+                        "response_text": r["response_text"],
+                        "ssr_score": r["ssr_score"],
+                    }
+                    for r in all_results
+                ]
+                analyzer = QuickAnalyzer()
+                insight_data = await analyzer.analyze(
+                    responses_for_analysis, main_scores.mean_score
+                )
+                quick_insight = QuickInsightPreview(
+                    one_liner=insight_data.one_liner,
+                    pain_points=[
+                        {
+                            "rank": pp.rank,
+                            "title": pp.title,
+                            "category": pp.category,
+                            "is_unlocked": (i == 0),
+                            "description": pp.description if i == 0 else None,
+                            "affected_percentage": pp.affected_percentage if i == 0 else None,
+                        }
+                        for i, pp in enumerate(insight_data.pain_points)
+                    ],
+                    generated_at=insight_data.generated_at,
+                )
+                logger.info(f"QuickInsight generated for workflow {workflow_id}")
+            except Exception as e:
+                logger.warning(f"QuickInsight generation failed: {e}")
+                quick_insight = None
+
         _execution_jobs[job_id].status = "completed"
         _execution_jobs[job_id].completed_at = datetime.now(timezone.utc)
         _save_job_to_db(_execution_jobs[job_id])
@@ -461,6 +508,8 @@ async def _execute_survey_background(
             comparison_mode=comparison_mode,
             concept_scores=concept_scores,
             comparison_stats=comparison_stats,
+            # Quick insight for free tier
+            quick_insight=quick_insight,
         )
         _execution_results[job_id] = exec_result
         _save_result_to_db(exec_result)

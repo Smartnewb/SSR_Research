@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Home, Trophy, BarChart3, FlaskConical, Users, RotateCcw, ArrowLeft, Brain } from "lucide-react";
 import { toast } from "sonner";
 import { QIEDashboard } from "@/components/qie";
+import { QuickInsightCard } from "@/components/survey/QuickInsightCard";
 
 interface ConceptScore {
   concept_id: string;
@@ -42,6 +43,19 @@ interface ComparisonStatistics {
   interpretation: string;
 }
 
+interface QuickInsightPreview {
+  one_liner: string;
+  pain_points: Array<{
+    rank: number;
+    title: string;
+    category: string;
+    is_unlocked: boolean;
+    description?: string;
+    affected_percentage?: number;
+  }>;
+  generated_at: string;
+}
+
 interface ExecutionResult {
   job_id: string;
   workflow_id: string;
@@ -66,6 +80,7 @@ interface ExecutionResult {
   comparison_mode: "single" | "ab_test" | "multi_compare";
   concept_scores: ConceptScore[] | null;
   comparison_stats: ComparisonStatistics | null;
+  quick_insight?: QuickInsightPreview;
 }
 
 export default function ResultsPage() {
@@ -432,6 +447,17 @@ export default function ResultsPage() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* Quick Insight Card */}
+          {results.quick_insight && (
+            <QuickInsightCard
+              insight={results.quick_insight}
+              onUpgradeClick={() => {
+                const tabsTrigger = document.querySelector('[data-state="inactive"][value="qie"]') as HTMLElement;
+                if (tabsTrigger) tabsTrigger.click();
+              }}
+            />
           )}
 
           {/* Sample Responses */}
