@@ -41,6 +41,8 @@ export default function GeneratingPersonasPage() {
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
 
+  const MAX_CONSECUTIVE_ERRORS = 3;
+
   useEffect(() => {
     const startGeneration = async () => {
       try {
@@ -62,6 +64,8 @@ export default function GeneratingPersonasPage() {
     };
 
     const pollStatus = () => {
+      let consecutiveErrors = 0;
+
       const interval = setInterval(async () => {
         try {
           const response = await fetch(
@@ -69,9 +73,18 @@ export default function GeneratingPersonasPage() {
           );
 
           if (!response.ok) {
+            // 404는 리소스가 존재하지 않음 - 즉시 중단
+            if (response.status === 404) {
+              clearInterval(interval);
+              const errorData = await response.json().catch(() => ({}));
+              setError(errorData.detail || "생성 정보를 찾을 수 없습니다.");
+              return;
+            }
             throw new Error("Failed to get status");
           }
 
+          // 성공 시 에러 카운트 리셋
+          consecutiveErrors = 0;
           const data = await response.json();
           setStatus(data);
 
@@ -86,6 +99,13 @@ export default function GeneratingPersonasPage() {
           }
         } catch (err: any) {
           console.error("Error polling status:", err);
+          consecutiveErrors += 1;
+
+          // 연속 에러가 임계값 초과 시 폴링 중단
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            clearInterval(interval);
+            setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.");
+          }
         }
       }, 500);
 

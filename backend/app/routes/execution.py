@@ -332,22 +332,18 @@ async def _execute_single_concept_survey(
     personas: list[dict],
     use_mock: bool,
     on_persona_complete=None,
-    max_retry_rounds: int = 3,
 ) -> ConceptScore:
     """Execute survey for a single concept using parallel processing.
 
     Uses asyncio.gather with Semaphore to run up to MAX_CONCURRENT_SURVEYS
     persona surveys in parallel. This provides ~10x speedup over sequential.
 
-    Failed personas are automatically retried up to max_retry_rounds times
-    with increasing delays between rounds.
+    FAIL-FAST: If any persona survey fails, immediately raise an error.
+    No retries - ensures data integrity and quick error detection.
 
     Args:
         on_persona_complete: Callback called each time a single persona completes
-        max_retry_rounds: Maximum number of retry rounds for failed personas
     """
-    import random
-
     start_time = time.time()
 
     # Get or initialize pipeline singleton
@@ -356,88 +352,42 @@ async def _execute_single_concept_survey(
     # Create semaphore for concurrency control
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SURVEYS)
 
-    # Track results and personas to process
-    all_results = []
-    personas_to_process = [(i, p) for i, p in enumerate(personas)]
+    # Create tasks for all personas
+    tasks = [
+        _survey_single_persona(
+            semaphore=semaphore,
+            pipeline=pipeline,
+            persona=persona,
+            product_description=product_description,
+            concept_id=concept_id,
+            concept_title=concept_title,
+            use_mock=use_mock,
+            persona_index=idx,
+            on_complete=on_persona_complete,
+        )
+        for idx, persona in enumerate(personas)
+    ]
 
-    for retry_round in range(max_retry_rounds):
-        if not personas_to_process:
-            break
+    # Execute all tasks - FAIL-FAST on any error
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        if retry_round > 0:
-            # Wait before retry with exponential backoff + jitter
-            wait_time = (2 ** retry_round) + random.uniform(0, 1)
-            logger.info(
-                f"Retry round {retry_round + 1}: waiting {wait_time:.1f}s before "
-                f"retrying {len(personas_to_process)} failed personas"
-            )
-            await asyncio.sleep(wait_time)
-
-        # Create tasks for current batch
-        tasks = [
-            _survey_single_persona(
-                semaphore=semaphore,
-                pipeline=pipeline,
-                persona=persona,
-                product_description=product_description,
-                concept_id=concept_id,
-                concept_title=concept_title,
-                use_mock=use_mock,
-                persona_index=idx,
-                on_complete=on_persona_complete if retry_round == 0 else None,
-            )
-            for idx, persona in personas_to_process
-        ]
-
-        # Execute batch
-        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Separate successes and failures
-        failed_personas = []
-        for (idx, persona), result in zip(personas_to_process, raw_results):
-            if isinstance(result, Exception):
-                failed_personas.append((idx, persona))
-                if retry_round == max_retry_rounds - 1:
-                    logger.error(
-                        f"Persona {persona['id']} failed after {max_retry_rounds} rounds: {result}"
-                    )
-                else:
-                    logger.warning(
-                        f"Persona {persona['id']} failed (round {retry_round + 1}): {result}"
-                    )
-            else:
-                all_results.append(result)
-
-        personas_to_process = failed_personas
-
-        if retry_round == 0:
-            logger.info(
-                f"Concept '{concept_title}': {len(all_results)}/{len(personas)} succeeded, "
-                f"{len(failed_personas)} failed in first round"
+    # Check for any failures - fail immediately if found
+    for idx, result in enumerate(raw_results):
+        if isinstance(result, Exception):
+            persona_id = personas[idx].get('id', f'index_{idx}')
+            logger.error(f"Persona {persona_id} failed: {result}")
+            raise RuntimeError(
+                f"Survey failed for persona {persona_id}: {result}. "
+                "Aborting entire survey execution."
             )
 
+    results = list(raw_results)
     elapsed = time.time() - start_time
-    final_failed = len(personas_to_process)
-
-    if final_failed > 0:
-        logger.warning(
-            f"Concept '{concept_title}': {final_failed}/{len(personas)} personas "
-            f"failed after {max_retry_rounds} retry rounds"
-        )
-
-    # Raise error if all personas failed
-    if not all_results:
-        raise RuntimeError(
-            f"All {len(personas)} persona surveys failed for concept '{concept_title}' "
-            f"after {max_retry_rounds} retry rounds"
-        )
 
     logger.info(
-        f"Concept '{concept_title}': completed {len(all_results)}/{len(personas)} personas "
-        f"in {elapsed:.1f}s ({len(all_results)/elapsed:.1f} personas/sec)"
+        f"Concept '{concept_title}': completed {len(results)}/{len(personas)} personas "
+        f"in {elapsed:.1f}s ({len(results)/elapsed:.1f} personas/sec)"
     )
-
-    results = all_results
 
     scores = [r["ssr_score"] for r in results]
     mean_score, median_score, std_dev, score_distribution = _calculate_stats(scores)

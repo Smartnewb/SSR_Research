@@ -37,28 +37,45 @@ export default function ExecutingSurveyPage() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   // 실행 시작 여부를 추적하여 중복 실행 방지
   const hasStartedRef = useRef(false);
+  // 연속 에러 횟수 추적
+  const consecutiveErrorsRef = useRef(0);
+  const MAX_CONSECUTIVE_ERRORS = 5;
+  // 현재 폴링 간격 (지수 백오프용)
+  const currentIntervalRef = useRef(500);
+  const BASE_INTERVAL = 500;
+  const MAX_INTERVAL = 10000;
+  // 재시도 가능 여부
+  const [canRetry, setCanRetry] = useState(false);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
-      clearInterval(intervalRef.current);
+      clearTimeout(intervalRef.current);
       intervalRef.current = null;
     }
   }, []);
 
-  const startPolling = useCallback(() => {
-    // 이미 폴링 중이면 중복 시작 방지
-    if (intervalRef.current) return;
-
-    intervalRef.current = setInterval(async () => {
+  const scheduleNextPoll = useCallback(() => {
+    const poll = async () => {
       try {
         const response = await fetch(
           `http://localhost:8000/api/workflows/${workflowId}/execute/status`
         );
 
         if (!response.ok) {
+          // 404는 리소스가 존재하지 않음 - 즉시 중단
+          if (response.status === 404) {
+            stopPolling();
+            setCanRetry(true);
+            const errorData = await response.json().catch(() => ({}));
+            setError(errorData.detail || "실행 정보를 찾을 수 없습니다. 설문이 아직 시작되지 않았거나 만료되었습니다.");
+            return;
+          }
           throw new Error("Failed to get status");
         }
 
+        // 성공 시 에러 카운트 리셋 및 간격 초기화
+        consecutiveErrorsRef.current = 0;
+        currentIntervalRef.current = BASE_INTERVAL;
         const data = await response.json();
         setStatus(data);
 
@@ -67,17 +84,51 @@ export default function ExecutingSurveyPage() {
           setTimeout(() => {
             router.push(`/workflows/${workflowId}/results`);
           }, 1000);
+          return;
         }
 
         if (data.status === "failed") {
           stopPolling();
+          setCanRetry(true);
           setError(data.error || "Execution failed");
+          return;
         }
+
+        // 다음 폴링 예약
+        intervalRef.current = setTimeout(scheduleNextPoll, currentIntervalRef.current);
       } catch (err: any) {
-        console.error("Error polling status:", err);
+        consecutiveErrorsRef.current += 1;
+        console.error(`Polling error (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+
+        // 연속 에러가 임계값 초과 시 폴링 중단
+        if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
+          stopPolling();
+          setCanRetry(true);
+          setError(`서버 연결에 실패했습니다 (${MAX_CONSECUTIVE_ERRORS}회 재시도 후 중단). 백엔드 서버가 실행 중인지 확인해주세요.`);
+          return;
+        }
+
+        // 지수 백오프: 간격을 2배로 늘림 (최대 10초)
+        currentIntervalRef.current = Math.min(currentIntervalRef.current * 2, MAX_INTERVAL);
+        console.log(`Next retry in ${currentIntervalRef.current}ms`);
+        intervalRef.current = setTimeout(scheduleNextPoll, currentIntervalRef.current);
       }
-    }, 500);
+    };
+
+    poll();
   }, [workflowId, router, stopPolling]);
+
+  const startPolling = useCallback(() => {
+    // 이미 폴링 중이면 중복 시작 방지
+    if (intervalRef.current) return;
+    // 폴링 시작 시 초기화
+    consecutiveErrorsRef.current = 0;
+    currentIntervalRef.current = BASE_INTERVAL;
+    setCanRetry(false);
+    setError(null);
+
+    scheduleNextPoll();
+  }, [scheduleNextPoll]);
 
   useEffect(() => {
     // 이미 시작했으면 중복 실행 방지
@@ -218,14 +269,24 @@ export default function ExecutingSurveyPage() {
             <div className="bg-destructive/10 border border-destructive text-destructive p-4 rounded">
               <p className="font-semibold mb-1">오류 발생</p>
               <p className="text-sm">{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => router.push(`/workflows/${workflowId}/concepts`)}
-              >
-                컨셉 관리로 돌아가기
-              </Button>
+              <div className="flex gap-2 mt-3">
+                {canRetry && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => startPolling()}
+                  >
+                    다시 시도
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push(`/workflows/${workflowId}/concepts`)}
+                >
+                  컨셉 관리로 돌아가기
+                </Button>
+              </div>
             </div>
           ) : status ? (
             <>
