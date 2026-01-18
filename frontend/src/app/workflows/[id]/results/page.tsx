@@ -523,8 +523,12 @@ export default function ResultsPage() {
           </div>
         </TabsContent>
 
-        {/* QIE Analysis Tab */}
-        <TabsContent value="qie" className="mt-6">
+        {/* QIE Analysis Tab - forceMount keeps component alive during tab switches */}
+        <TabsContent
+          value="qie"
+          className="mt-6 data-[state=inactive]:hidden"
+          forceMount
+        >
           <QIEDashboard workflowId={workflowId} />
         </TabsContent>
       </Tabs>
