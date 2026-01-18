@@ -13,14 +13,16 @@ ENV_FILE = PROJECT_ROOT / ".env"
 
 # Load .env file into os.environ BEFORE pydantic_settings reads it
 # This ensures os.getenv() calls in other modules (e.g., src/pipeline.py) work correctly
-load_dotenv(ENV_FILE)
+# Only load if file exists (won't exist in production/Railway)
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment."""
 
     model_config = SettingsConfigDict(
-        env_file=str(ENV_FILE),
+        env_file=str(ENV_FILE) if ENV_FILE.exists() else None,
         env_file_encoding="utf-8",
         extra="ignore",
     )
