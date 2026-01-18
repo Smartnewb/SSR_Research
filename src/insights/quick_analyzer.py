@@ -156,8 +156,9 @@ class QuickAnalyzer:
                 messages=[
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.3,
-                max_tokens=800,
+                # Note: gpt-5-mini requires reasoning_effort but not temperature
+                reasoning_effort="minimal",
+                max_completion_tokens=800,
             )
 
             content = completion.choices[0].message.content or "{}"

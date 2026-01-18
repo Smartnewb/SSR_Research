@@ -50,7 +50,7 @@ Output as JSON: {{"suggestions": [{{"text": "...", "rationale": "..."}}]}}"""
         response_format={"type": "json_object"},
         reasoning_effort="none",
         temperature=0.8,
-        max_tokens=1000,
+        max_completion_tokens=1000,
     )
 
     result = json.loads(response.choices[0].message.content)
@@ -143,7 +143,7 @@ Output as JSON:
         response_format={"type": "json_object"},
         reasoning_effort="none",
         temperature=0.3,
-        max_tokens=1500,
+        max_completion_tokens=1500,
     )
 
     return json.loads(response.choices[0].message.content)

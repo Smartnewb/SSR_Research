@@ -62,8 +62,9 @@ class Tier1Tagger:
                         {"role": "system", "content": TIER1_SYSTEM_PROMPT},
                         {"role": "user", "content": response_text},
                     ],
-                    temperature=0,
-                    max_tokens=150,
+                    # Note: gpt-5-mini requires reasoning_effort but not temperature
+                    reasoning_effort="minimal",
+                    max_completion_tokens=150,
                 )
 
                 content = completion.choices[0].message.content or "{}"

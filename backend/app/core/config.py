@@ -33,7 +33,8 @@ class Settings(BaseSettings):
 
     llm_model: str = "gpt-5-nano"
     survey_model: str = "gpt-5-nano"
-    survey_reasoning_effort: str = "none"
+    # Note: gpt-5-nano only supports minimal/low/medium/high (NOT none)
+    survey_reasoning_effort: str = "minimal"
     analysis_model: str = "gpt-5.2"
     analysis_reasoning_effort: str = "high"
     analysis_verbosity: str = "medium"
@@ -51,8 +52,9 @@ class Settings(BaseSettings):
 
     # QIE (Qualitative Insight Engine) v2.0 - Two-Tier Map-Reduce
     # Tier 1: Data structuring (gpt-5-mini) - fast, cost-effective
+    # Note: gpt-5-mini only supports minimal/low/medium/high (NOT none)
     qie_tier1_model: str = "gpt-5-mini"
-    qie_tier1_reasoning_effort: str = "none"  # Speed optimization
+    qie_tier1_reasoning_effort: str = "minimal"  # Speed optimization (none not supported)
     qie_tier1_verbosity: str = "low"  # JSON output stability
     qie_tier1_batch_size: int = 10  # Concurrent requests (rate limit aware)
     qie_tier1_max_retries: int = 3

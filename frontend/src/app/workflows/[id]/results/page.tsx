@@ -237,7 +237,7 @@ export default function ResultsPage() {
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="summary" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
-            설문 결과
+            AI 기초 분석
           </TabsTrigger>
           <TabsTrigger value="qie" className="flex items-center gap-2">
             <Brain className="h-4 w-4" />

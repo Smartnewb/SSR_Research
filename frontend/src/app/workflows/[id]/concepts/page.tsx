@@ -9,8 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Trash2, Play, ArrowLeft, Package, FlaskConical } from "lucide-react";
+import { Plus, Trash2, Play, ArrowLeft, Package, FlaskConical, Sparkles, Loader2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import type { ConceptInput } from "@/lib/types";
+
+type LoadingStage = "workflow" | "generating" | "done";
 
 interface Workflow {
   id: string;
@@ -46,12 +49,14 @@ export default function ConceptsManagementPage() {
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [concepts, setConcepts] = useState<ConceptInput[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingStage, setLoadingStage] = useState<LoadingStage>("workflow");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchWorkflow = async () => {
       try {
+        setLoadingStage("workflow");
         const response = await fetch(
           `http://localhost:8000/api/workflows/${workflowId}`
         );
@@ -63,8 +68,11 @@ export default function ConceptsManagementPage() {
 
         if (data.concepts && data.concepts.length > 0) {
           setConcepts(data.concepts);
+          setLoadingStage("done");
         } else {
+          setLoadingStage("generating");
           await createConceptFromProduct();
+          setLoadingStage("done");
         }
       } catch (err: any) {
         setError(err.message);
@@ -217,9 +225,46 @@ export default function ConceptsManagementPage() {
   };
 
   if (isLoading) {
+    const stages = {
+      workflow: { progress: 30, message: "워크플로우 정보를 불러오는 중..." },
+      generating: { progress: 60, message: "AI가 마케팅 컨셉을 생성하는 중..." },
+      done: { progress: 100, message: "완료!" },
+    };
+    const current = stages[loadingStage];
+
     return (
-      <div className="max-w-4xl mx-auto py-8 text-center">
-        <div className="animate-pulse">데이터를 불러오는 중...</div>
+      <div className="max-w-md mx-auto py-16">
+        <Card>
+          <CardContent className="pt-6 space-y-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <Sparkles className="h-12 w-12 text-primary animate-pulse" />
+              </div>
+              <div className="text-center space-y-2">
+                <h3 className="font-semibold text-lg">컨셉 준비 중</h3>
+                <p className="text-sm text-muted-foreground">
+                  {current.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Progress value={current.progress} className="h-2" />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>워크플로우 로드</span>
+                <span>컨셉 생성</span>
+                <span>완료</span>
+              </div>
+            </div>
+
+            {loadingStage === "generating" && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>AI가 제품 정보를 분석하고 있습니다 (약 3-5초)</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

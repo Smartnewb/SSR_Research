@@ -55,10 +55,33 @@ export default function NewWorkflowPage() {
   const [previousWorkflows, setPreviousWorkflows] = useState<Workflow[]>([]);
   const [loadingWorkflows, setLoadingWorkflows] = useState(true);
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
+  const [deletingWorkflow, setDeletingWorkflow] = useState<string | null>(null);
 
   useEffect(() => {
     loadPreviousWorkflows();
   }, []);
+
+  const handleDeleteWorkflow = async (e: React.MouseEvent, workflowId: string) => {
+    e.stopPropagation();
+    if (!confirm("이 설문 데이터를 삭제하시겠습니까?")) return;
+
+    setDeletingWorkflow(workflowId);
+    try {
+      const response = await fetch(`http://localhost:8000/api/workflows/${workflowId}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setPreviousWorkflows((prev) => prev.filter((w) => w.id !== workflowId));
+        if (selectedWorkflow === workflowId) {
+          setSelectedWorkflow(null);
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting workflow:", error);
+    } finally {
+      setDeletingWorkflow(null);
+    }
+  };
 
   const loadPreviousWorkflows = async () => {
     try {
@@ -136,17 +159,34 @@ export default function NewWorkflowPage() {
               if (workflow.concepts?.length) savedData.push(`컨셉 ${workflow.concepts.length}개`);
 
               return (
-                <button
+                <div
                   key={workflow.id}
-                  type="button"
-                  className={`w-full p-4 rounded-lg border-2 cursor-pointer transition-all text-left ${
+                  role="button"
+                  tabIndex={0}
+                  className={`relative w-full p-4 rounded-lg border-2 cursor-pointer transition-all text-left ${
                     selectedWorkflow === workflow.id
                       ? "border-blue-500 bg-blue-100"
                       : "border-gray-200 bg-white hover:border-blue-300"
                   }`}
                   onClick={() => setSelectedWorkflow(workflow.id)}
+                  onKeyDown={(e) => e.key === "Enter" && setSelectedWorkflow(workflow.id)}
                 >
-                  <div className="flex items-start justify-between">
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteWorkflow(e, workflow.id)}
+                    disabled={deletingWorkflow === workflow.id}
+                    className="absolute top-2 right-2 p-1 rounded-full hover:bg-red-100 text-gray-400 hover:text-red-500 transition-colors"
+                    title="삭제"
+                  >
+                    {deletingWorkflow === workflow.id ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                  <div className="flex items-start justify-between pr-6">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">
@@ -181,7 +221,7 @@ export default function NewWorkflowPage() {
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
 

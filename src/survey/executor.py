@@ -19,9 +19,26 @@ def _get_default_model() -> str:
     return os.getenv("SURVEY_MODEL", os.getenv("LLM_MODEL", "gpt-5-nano"))
 
 
-def _get_reasoning_effort() -> str:
-    """Get reasoning effort from environment or fallback."""
-    return os.getenv("SURVEY_REASONING_EFFORT", "none")
+def _get_reasoning_effort(model: str = "") -> str:
+    """Get reasoning effort from environment or appropriate default for model.
+
+    Per GPT-5.2 docs:
+    - GPT 5 (gpt-5, gpt-5-mini, gpt-5-nano): supports minimal, low, medium (default), high
+    - GPT 5.1, 5.2: supports none (default), low, medium, high, xhigh
+
+    'none' is NOT supported by older GPT-5 models!
+    """
+    env_value = os.getenv("SURVEY_REASONING_EFFORT")
+    if env_value:
+        return env_value
+
+    # Older GPT-5 models don't support 'none', use 'minimal' instead
+    older_gpt5_models = {"gpt-5", "gpt-5-mini", "gpt-5-nano"}
+    if model in older_gpt5_models:
+        return "minimal"
+
+    # GPT-5.1, GPT-5.2 support 'none' as default
+    return "none"
 
 
 PRICING = {
@@ -144,7 +161,7 @@ def get_purchase_opinion(
         client = openai.OpenAI()
 
     model = model or _get_default_model()
-    reasoning_effort = reasoning_effort or _get_reasoning_effort()
+    reasoning_effort = reasoning_effort or _get_reasoning_effort(model)
 
     start_time = time.time()
 
@@ -161,6 +178,10 @@ def get_purchase_opinion(
 
     if supports_temperature(model, reasoning_effort):
         api_params["temperature"] = temperature
+
+    # Add reasoning_effort for GPT-5 models
+    if model in GPT5_MODELS and reasoning_effort:
+        api_params["reasoning_effort"] = reasoning_effort
 
     response = client.chat.completions.create(**api_params)
 
@@ -213,7 +234,7 @@ def get_purchase_opinion_with_retry(
     import openai
 
     model = model or _get_default_model()
-    reasoning_effort = reasoning_effort or _get_reasoning_effort()
+    reasoning_effort = reasoning_effort or _get_reasoning_effort(model)
     reinforced = False
 
     for attempt in range(max_retries):
@@ -274,6 +295,12 @@ def get_purchase_opinion_with_retry(
                     "usage": usage,
                     "attempts": attempt + 1,
                 }
+
+            # Log validation failure with details
+            logger.warning(
+                f"Response validation failed on attempt {attempt + 1}/{max_retries}: {error_msg}. "
+                f"Response preview: {response_text[:100]}..."
+            )
 
             if "numeric rating" in error_msg and attempt < max_retries - 1:
                 reinforced = True

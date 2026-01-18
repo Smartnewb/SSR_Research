@@ -162,6 +162,10 @@ def _save_result_to_db(result: ExecutionResult):
         std_dev=result.std_dev,
         score_distribution=result.score_distribution,
         results=result.results,
+        comparison_mode=result.comparison_mode,
+        concept_scores=[cs.model_dump() for cs in result.concept_scores] if result.concept_scores else None,
+        comparison_stats=result.comparison_stats.model_dump() if result.comparison_stats else None,
+        quick_insight=result.quick_insight.model_dump() if result.quick_insight else None,
     )
 
 
@@ -328,15 +332,22 @@ async def _execute_single_concept_survey(
     personas: list[dict],
     use_mock: bool,
     on_persona_complete=None,
+    max_retry_rounds: int = 3,
 ) -> ConceptScore:
     """Execute survey for a single concept using parallel processing.
 
     Uses asyncio.gather with Semaphore to run up to MAX_CONCURRENT_SURVEYS
     persona surveys in parallel. This provides ~10x speedup over sequential.
 
+    Failed personas are automatically retried up to max_retry_rounds times
+    with increasing delays between rounds.
+
     Args:
         on_persona_complete: Callback called each time a single persona completes
+        max_retry_rounds: Maximum number of retry rounds for failed personas
     """
+    import random
+
     start_time = time.time()
 
     # Get or initialize pipeline singleton
@@ -345,30 +356,88 @@ async def _execute_single_concept_survey(
     # Create semaphore for concurrency control
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SURVEYS)
 
-    # Create all survey tasks with individual completion callbacks
-    tasks = [
-        _survey_single_persona(
-            semaphore=semaphore,
-            pipeline=pipeline,
-            persona=persona,
-            product_description=product_description,
-            concept_id=concept_id,
-            concept_title=concept_title,
-            use_mock=use_mock,
-            persona_index=i,
-            on_complete=on_persona_complete,
-        )
-        for i, persona in enumerate(personas)
-    ]
+    # Track results and personas to process
+    all_results = []
+    personas_to_process = [(i, p) for i, p in enumerate(personas)]
 
-    # Execute all tasks in parallel (with semaphore limiting concurrency)
-    results = await asyncio.gather(*tasks)
+    for retry_round in range(max_retry_rounds):
+        if not personas_to_process:
+            break
+
+        if retry_round > 0:
+            # Wait before retry with exponential backoff + jitter
+            wait_time = (2 ** retry_round) + random.uniform(0, 1)
+            logger.info(
+                f"Retry round {retry_round + 1}: waiting {wait_time:.1f}s before "
+                f"retrying {len(personas_to_process)} failed personas"
+            )
+            await asyncio.sleep(wait_time)
+
+        # Create tasks for current batch
+        tasks = [
+            _survey_single_persona(
+                semaphore=semaphore,
+                pipeline=pipeline,
+                persona=persona,
+                product_description=product_description,
+                concept_id=concept_id,
+                concept_title=concept_title,
+                use_mock=use_mock,
+                persona_index=idx,
+                on_complete=on_persona_complete if retry_round == 0 else None,
+            )
+            for idx, persona in personas_to_process
+        ]
+
+        # Execute batch
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Separate successes and failures
+        failed_personas = []
+        for (idx, persona), result in zip(personas_to_process, raw_results):
+            if isinstance(result, Exception):
+                failed_personas.append((idx, persona))
+                if retry_round == max_retry_rounds - 1:
+                    logger.error(
+                        f"Persona {persona['id']} failed after {max_retry_rounds} rounds: {result}"
+                    )
+                else:
+                    logger.warning(
+                        f"Persona {persona['id']} failed (round {retry_round + 1}): {result}"
+                    )
+            else:
+                all_results.append(result)
+
+        personas_to_process = failed_personas
+
+        if retry_round == 0:
+            logger.info(
+                f"Concept '{concept_title}': {len(all_results)}/{len(personas)} succeeded, "
+                f"{len(failed_personas)} failed in first round"
+            )
 
     elapsed = time.time() - start_time
+    final_failed = len(personas_to_process)
+
+    if final_failed > 0:
+        logger.warning(
+            f"Concept '{concept_title}': {final_failed}/{len(personas)} personas "
+            f"failed after {max_retry_rounds} retry rounds"
+        )
+
+    # Raise error if all personas failed
+    if not all_results:
+        raise RuntimeError(
+            f"All {len(personas)} persona surveys failed for concept '{concept_title}' "
+            f"after {max_retry_rounds} retry rounds"
+        )
+
     logger.info(
-        f"Concept '{concept_title}': surveyed {len(personas)} personas "
-        f"in {elapsed:.1f}s ({len(personas)/elapsed:.1f} personas/sec)"
+        f"Concept '{concept_title}': completed {len(all_results)}/{len(personas)} personas "
+        f"in {elapsed:.1f}s ({len(all_results)/elapsed:.1f} personas/sec)"
     )
+
+    results = all_results
 
     scores = [r["ssr_score"] for r in results]
     mean_score, median_score, std_dev, score_distribution = _calculate_stats(scores)
@@ -482,7 +551,7 @@ async def _execute_survey_background(
                         }
                         for i, pp in enumerate(insight_data.pain_points)
                     ],
-                    generated_at=insight_data.generated_at,
+                    generated_at=insight_data.generated_at.isoformat(),
                 )
                 logger.info(f"QuickInsight generated for workflow {workflow_id}")
             except Exception as e:
@@ -560,7 +629,7 @@ async def start_execution(
             )
         # force=True: 워크플로우 상태를 리셋하고 재실행
         logger.info(f"Force re-running completed workflow {workflow_id}")
-        workflow.status = WorkflowStatus.CONCEPTS_CONFIRMED
+        workflow.status = WorkflowStatus.CONCEPTS_MANAGEMENT
         workflow.survey_execution_job_id = None
 
     # 이미 설문 실행 중이면 기존 job 상태 반환 (중복 실행 방지, force=True면 새로 시작)

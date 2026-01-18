@@ -73,17 +73,6 @@ export default function ProductDescriptionPage() {
     });
   };
 
-  const handleFillExample = () => {
-    setFormData({
-      name: "썸타임",
-      category: "소개팅 앱",
-      description: "지역 대학생 소개팅 앱으로 AI 기반으로 1:1매칭 주변 대학생만 매칭함",
-      features: ["AI 매칭", "1:1 소개팅"],
-      price_point: "9,900원 / 1회 매칭",
-      target_market: "대학생 18~27세",
-    });
-  };
-
   const handleGetAIHelp = () => {
     setChatOpen(true);
   };
@@ -105,13 +94,25 @@ export default function ProductDescriptionPage() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to save product description");
+        const errorData = await response.json().catch(() => null);
+        if (errorData?.detail) {
+          if (Array.isArray(errorData.detail)) {
+            const messages = errorData.detail.map((e: { loc?: string[]; msg?: string }) => {
+              const field = e.loc?.[1] || "field";
+              return `${field}: ${e.msg}`;
+            }).join("\n");
+            throw new Error(messages);
+          }
+          throw new Error(String(errorData.detail));
+        }
+        throw new Error(`Failed to save (HTTP ${response.status})`);
       }
 
       router.push(`/workflows/${workflowId}/persona`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error saving product:", error);
-      alert("Failed to save product description");
+      const message = error instanceof Error ? error.message : "Failed to save product description";
+      alert(message);
     } finally {
       setLoading(false);
     }
@@ -234,12 +235,6 @@ export default function ProductDescriptionPage() {
           </div>
 
           <div className="flex gap-2 pt-4">
-            <Button
-              onClick={handleFillExample}
-              variant="secondary"
-            >
-              예시 채우기
-            </Button>
             <Button
               onClick={handleGetAIHelp}
               variant="outline"

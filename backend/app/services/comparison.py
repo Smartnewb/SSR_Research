@@ -113,11 +113,11 @@ Product: {concept.title}
 
 Consumer Insight: {concept.consumer_insight}
 
-Key Benefit: {concept.benefit}
+Key Benefits: {', '.join(concept.benefits) if concept.benefits else 'N/A'}
 
-Reason to Believe: {concept.rtb}
+Reason to Believe: {', '.join(concept.rtb) if concept.rtb else 'N/A'}
 
-Product Description: {concept.image_description}
+Product Description: {concept.image_prompt}
 
 Price: {concept.price}
 """.strip()

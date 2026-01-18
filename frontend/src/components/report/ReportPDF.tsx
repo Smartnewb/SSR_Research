@@ -120,13 +120,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   quote: {
-    fontStyle: "italic",
     color: "#6b7280",
     fontSize: 9,
     marginTop: 4,
     paddingLeft: 10,
     borderLeftWidth: 2,
-    borderLeftColor: "#d1d5db",
+    borderLeftColor: "#4f46e5",
   },
   segmentCard: {
     marginBottom: 12,

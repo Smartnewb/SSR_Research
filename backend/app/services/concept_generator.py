@@ -99,15 +99,31 @@ Generate a persuasive Concept Board that would make the target market want to bu
 Remember: Transform the raw specs into emotional, compelling marketing copy!"""
 
     try:
-        response = await client.chat.completions.create(
-            model=_get_concept_model(),
-            messages=[
+        model = _get_concept_model()
+        model_lower = model.lower()
+
+        # GPT-5 모델별 temperature 지원 여부 (OpenAI 공식 문서 기준)
+        # - gpt-5, gpt-5-mini, gpt-5-nano: reasoning 기본값 medium → temperature 미지원
+        # - gpt-5.1, gpt-5.2: reasoning 기본값 none → temperature 지원
+        # temperature는 reasoning_effort="none"일 때만 지원됨
+        older_gpt5_models = ["gpt-5-nano", "gpt-5-mini"]
+        is_older_gpt5 = any(m in model_lower for m in older_gpt5_models) or model_lower == "gpt-5"
+
+        create_params = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": CONCEPT_GENERATOR_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.8,  # Slightly creative for marketing copy
-        )
+            "response_format": {"type": "json_object"},
+        }
+
+        # older GPT-5 모델(gpt-5, gpt-5-mini, gpt-5-nano)은 temperature 미지원
+        # gpt-5.1, gpt-5.2는 reasoning 기본값이 none이므로 temperature 지원
+        if not is_older_gpt5:
+            create_params["temperature"] = 0.8
+
+        response = await client.chat.completions.create(**create_params)
 
         content = response.choices[0].message.content
         if not content:
@@ -124,6 +140,11 @@ Remember: Transform the raw specs into emotional, compelling marketing copy!"""
         if isinstance(rtb, str):
             rtb = [rtb]
 
+        # Truncate price to fit ConceptInput.price max_length (100 chars)
+        price_text = product.price_point or "가격 문의"
+        if len(price_text) > 97:
+            price_text = price_text[:97] + "..."
+
         return ConceptInput(
             id=concept_id,
             title=product.name,
@@ -132,7 +153,7 @@ Remember: Transform the raw specs into emotional, compelling marketing copy!"""
             benefits=benefits[:5],  # Max 5
             rtb=rtb[:5],  # Max 5
             image_prompt=result.get("image_prompt", f"Product photo of {product.name}"),
-            price=product.price_point or "가격 문의",
+            price=price_text,
         )
 
     except Exception as e:
@@ -144,6 +165,11 @@ async def generate_concept_from_product_mock(
     concept_id: str = "CONCEPT_001",
 ) -> ConceptInput:
     """Mock version for testing without API key."""
+    # Truncate price to fit ConceptInput.price max_length (100 chars)
+    price_text = product.price_point or "가격 문의"
+    if len(price_text) > 97:
+        price_text = price_text[:97] + "..."
+
     return ConceptInput(
         id=concept_id,
         title=product.name,
@@ -160,5 +186,5 @@ async def generate_concept_from_product_mock(
             f"{product.category} 전문가 추천",
         ],
         image_prompt=f"Professional product photography of {product.name}. Clean white background, soft studio lighting, high-end commercial style, 4K quality, minimal composition.",
-        price=product.price_point or "가격 문의",
+        price=price_text,
     )

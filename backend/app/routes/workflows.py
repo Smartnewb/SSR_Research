@@ -65,6 +65,21 @@ async def list_workflows():
     return workflows
 
 
+@router.delete("/{workflow_id}")
+async def delete_workflow(workflow_id: str):
+    """Delete a workflow by ID.
+
+    Removes the workflow from the database.
+    """
+    service = get_workflow_service()
+    workflow = service.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    service.delete_workflow(workflow_id)
+    return {"message": f"Workflow {workflow_id} deleted successfully"}
+
+
 @router.post("", response_model=CreateWorkflowResponse)
 async def create_workflow(copy_from: str = Query(None, description="Copy product and persona from existing workflow")):
     """Create a new survey workflow.

@@ -134,9 +134,25 @@ def init_database():
                 std_dev REAL NOT NULL,
                 score_distribution_json TEXT NOT NULL,
                 results_json TEXT NOT NULL,
+                comparison_mode TEXT DEFAULT 'single',
+                concept_scores_json TEXT,
+                comparison_stats_json TEXT,
+                quick_insight_json TEXT,
                 FOREIGN KEY (workflow_id) REFERENCES workflows(id)
             )
         """)
+
+        # Migration: Add new columns if they don't exist (for existing databases)
+        for column, col_type, default in [
+            ("comparison_mode", "TEXT", "'single'"),
+            ("concept_scores_json", "TEXT", "NULL"),
+            ("comparison_stats_json", "TEXT", "NULL"),
+            ("quick_insight_json", "TEXT", "NULL"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE execution_results ADD COLUMN {column} {col_type} DEFAULT {default}")
+            except Exception:
+                pass  # Column already exists
 
         # QIE (Qualitative Insight Engine) tables
         conn.execute("""
@@ -414,24 +430,40 @@ def load_execution_job(job_id: str) -> Optional[dict]:
         }
 
 
-def save_execution_result(job_id: str, workflow_id: str,
-                          total_respondents: int, execution_time: float,
-                          mean_score: float, median_score: float,
-                          std_dev: float, score_distribution: dict,
-                          results: list[dict]):
+def save_execution_result(
+    job_id: str,
+    workflow_id: str,
+    total_respondents: int,
+    execution_time: float,
+    mean_score: float,
+    median_score: float,
+    std_dev: float,
+    score_distribution: dict,
+    results: list[dict],
+    comparison_mode: str = "single",
+    concept_scores: Optional[list] = None,
+    comparison_stats: Optional[dict] = None,
+    quick_insight: Optional[dict] = None,
+):
     """Save execution result to database."""
     with get_connection() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO execution_results (
                 job_id, workflow_id, total_respondents, execution_time,
                 mean_score, median_score, std_dev,
-                score_distribution_json, results_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                score_distribution_json, results_json,
+                comparison_mode, concept_scores_json,
+                comparison_stats_json, quick_insight_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             job_id, workflow_id, total_respondents, execution_time,
             mean_score, median_score, std_dev,
             json.dumps(score_distribution),
-            json.dumps(results)
+            json.dumps(results),
+            comparison_mode,
+            json.dumps(concept_scores) if concept_scores else None,
+            json.dumps(comparison_stats) if comparison_stats else None,
+            json.dumps(quick_insight) if quick_insight else None,
         ))
 
 
@@ -456,6 +488,10 @@ def load_execution_result(job_id: str) -> Optional[dict]:
             "std_dev": row["std_dev"],
             "score_distribution": json.loads(row["score_distribution_json"]),
             "results": json.loads(row["results_json"]),
+            "comparison_mode": row["comparison_mode"] if row["comparison_mode"] else "single",
+            "concept_scores": json.loads(row["concept_scores_json"]) if row["concept_scores_json"] else None,
+            "comparison_stats": json.loads(row["comparison_stats_json"]) if row["comparison_stats_json"] else None,
+            "quick_insight": json.loads(row["quick_insight_json"]) if row["quick_insight_json"] else None,
         }
 
 

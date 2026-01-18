@@ -245,7 +245,7 @@ def enrich_persona_with_llm(
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=150,
+        max_completion_tokens=150,
         reasoning_effort="none",
         temperature=temperature,
     )

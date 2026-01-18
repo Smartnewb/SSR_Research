@@ -29,7 +29,7 @@ class ProductDescription(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
     description: str = Field(..., min_length=10, max_length=2000)
     features: list[str] = Field(default_factory=list)
-    price_point: Optional[str] = Field(None, max_length=100)
+    price_point: Optional[str] = Field(None, max_length=500)
     target_market: str = Field(..., min_length=1, max_length=200)
 
 
@@ -121,7 +121,7 @@ class ProductDescriptionRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
     description: str = Field(..., min_length=10, max_length=2000)
     features: list[str] = Field(default_factory=list)
-    price_point: Optional[str] = Field(None, max_length=100)
+    price_point: Optional[str] = Field(None, max_length=500)
     target_market: str = Field(..., min_length=1, max_length=200)
 
     @field_validator("price_point", mode="before")
